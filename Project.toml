@@ -1,0 +1,9 @@
+name = "BEVE"
+uuid = "e4b2c2d1-1234-5678-9abc-123456789abc"
+authors = ["BEVE.jl Contributors"]
+version = "1.0.0"
+
+[deps]
+
+[compat]
+julia = "1.8"
