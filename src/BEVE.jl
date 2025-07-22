@@ -9,8 +9,12 @@ export to_beve
 # Exports for deserialization  
 export from_beve, deser_beve
 
+# Exports for HTTP functionality
+export register_object, unregister_object, start_server, BeveHttpClient
+
 include("Headers.jl")
 include("Ser.jl")
 include("De.jl")
+include("Http.jl")
 
 end

@@ -4,6 +4,7 @@ authors = ["BEVE.jl Contributors"]
 version = "1.0.0"
 
 [deps]
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 
 [compat]
 julia = "1.8"

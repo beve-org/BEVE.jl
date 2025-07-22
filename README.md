@@ -183,6 +183,98 @@ To run the test suite:
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
+## HTTP Support
+
+BEVE.jl includes optional HTTP server and client functionality that allows you to serve and consume BEVE data over HTTP 1.1. This feature supports JSON pointer syntax for accessing specific parts of registered objects.
+
+### HTTP Server
+
+Register struct instances at HTTP paths and serve them via HTTP:
+
+```julia
+using BEVE
+
+# Define your structs
+struct Employee
+    id::Int
+    name::String
+    email::String
+    active::Bool
+end
+
+struct Company
+    name::String
+    employees::Vector{Employee}
+    founded::Int
+end
+
+# Create data
+employees = [
+    Employee(1, "Alice", "alice@company.com", true),
+    Employee(2, "Bob", "bob@company.com", false)
+]
+company = Company("ACME Corp", employees, 2020)
+
+# Register objects at HTTP paths
+register_object("/api/company", company)
+
+# Start HTTP server
+server = start_server("127.0.0.1", 8080)
+```
+
+The server supports JSON pointer syntax for accessing nested data:
+
+- `GET /api/company` - Returns entire company object
+- `GET /api/company?pointer=/name` - Returns just the company name
+- `GET /api/company?pointer=/employees` - Returns the employees array
+- `GET /api/company?pointer=/employees/0` - Returns first employee
+- `GET /api/company?pointer=/employees/0/name` - Returns first employee's name
+
+### HTTP Client
+
+Make requests to BEVE HTTP servers:
+
+```julia
+# Create client
+client = BeveHttpClient("http://localhost:8080")
+
+# Get entire company and deserialize to struct
+company = get(client, "/api/company", as_type=Company)
+
+# Get specific fields using JSON pointers
+company_name = get(client, "/api/company", json_pointer="/name")
+employees = get(client, "/api/company", json_pointer="/employees")
+first_employee = get(client, "/api/company", json_pointer="/employees/0", as_type=Employee)
+
+# Update data via POST
+post(client, "/api/company", "New Company Name", json_pointer="/name")
+```
+
+### JSON Pointer Support
+
+JSON pointers follow RFC 6901 standard:
+
+- `/` - Root object
+- `/field` - Access field named "field"
+- `/array/0` - Access first element of array
+- `/nested/field/value` - Access nested fields
+- Special characters: `~0` for `~`, `~1` for `/`
+
+### API Reference
+
+#### Server Functions
+
+- `register_object(path::String, obj)` - Register an object at the given HTTP path
+- `unregister_object(path::String)` - Remove an object from the given path
+- `start_server(host::String, port::Int)` - Start HTTP server
+
+#### Client Functions
+
+- `BeveHttpClient(base_url::String; headers::Dict)` - Create HTTP client
+- `get(client::BeveHttpClient, path::String; json_pointer::String, as_type::Type)` - GET request
+- `post(client::BeveHttpClient, path::String, data; json_pointer::String)` - POST request
+
 ## Compatibility
 
 - Julia 1.8+
+- HTTP.jl (for HTTP functionality)
