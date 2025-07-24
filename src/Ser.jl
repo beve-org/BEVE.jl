@@ -15,6 +15,38 @@ mutable struct BeveSerializer
     end
 end
 
+# Helper function for bulk endianness conversion
+@inline function convert_endianness!(dest::Vector{T}, src::Vector{T}) where T <: Union{Int16, Int32, Int64, UInt16, UInt32, UInt64, Float32, Float64}
+    if ENDIAN_BOM == 0x04030201  # Little endian system
+        # Most systems are little endian, so this is the fast path
+        return src
+    else
+        # Big endian system - need to swap bytes
+        @inbounds for i in 1:length(src)
+            dest[i] = htol(src[i])
+        end
+        return dest
+    end
+end
+
+# Optimized bulk write for arrays
+@inline function write_array_data(io::IO, data::Vector{T}) where T <: Union{Int8, UInt8}
+    # Int8 and UInt8 don't need endianness conversion
+    unsafe_write(io, pointer(data), length(data))
+end
+
+@inline function write_array_data(io::IO, data::Vector{T}) where T <: Union{Int16, Int32, Int64, UInt16, UInt32, UInt64, Float32, Float64}
+    if ENDIAN_BOM == 0x04030201  # Little endian system
+        # Direct write without conversion
+        unsafe_write(io, pointer(data), length(data) * sizeof(T))
+    else
+        # Big endian system - need conversion
+        converted = similar(data)
+        convert_endianness!(converted, data)
+        unsafe_write(io, pointer(converted), length(converted) * sizeof(T))
+    end
+end
+
 # Compressed size encoding as per BEVE spec
 function write_size(io::IO, size::Int)
     if size >= 2^62
@@ -207,78 +239,78 @@ end
 function beve_value!(ser::BeveSerializer, val::Vector{Float32})
     write(ser.io, F32_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{Float64})
     write(ser.io, F64_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{Int8})
     write(ser.io, I8_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{Int16})
     write(ser.io, I16_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{Int32})
     write(ser.io, I32_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{Int64})
     write(ser.io, I64_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{UInt8})
     write(ser.io, U8_ARRAY)
     write_size(ser.io, length(val))
-    write(ser.io, val)
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{UInt16})
     write(ser.io, U16_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{UInt32})
     write(ser.io, U32_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
-    end
+    write_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{UInt64})
     write(ser.io, U64_ARRAY)
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(v))
+    write_array_data(ser.io, val)
+end
+
+# Helper for complex array bulk writes
+@inline function write_complex_array_data(io::IO, data::Vector{Complex{T}}) where T <: Union{Float32, Float64}
+    n = length(data)
+    if ENDIAN_BOM == 0x04030201  # Little endian system
+        # Direct write of complex array as interleaved real/imag values
+        unsafe_write(io, pointer(data), n * sizeof(Complex{T}))
+    else
+        # Big endian - need to convert
+        # Create temporary buffer with converted values
+        buffer = Vector{T}(undef, 2n)
+        @inbounds for i in 1:n
+            buffer[2i-1] = htol(real(data[i]))
+            buffer[2i] = htol(imag(data[i]))
+        end
+        unsafe_write(io, pointer(buffer), length(buffer) * sizeof(T))
     end
 end
 
@@ -292,10 +324,7 @@ function beve_value!(ser::BeveSerializer, val::Vector{ComplexF32})
     # Result: 0b010'00'001 = 0x41
     write(ser.io, UInt8(0x41))
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(real(v)))
-        write(ser.io, htol(imag(v)))
-    end
+    write_complex_array_data(ser.io, val)
 end
 
 function beve_value!(ser::BeveSerializer, val::Vector{ComplexF64})
@@ -307,10 +336,7 @@ function beve_value!(ser::BeveSerializer, val::Vector{ComplexF64})
     # Result: 0b011'00'001 = 0x61
     write(ser.io, UInt8(0x61))
     write_size(ser.io, length(val))
-    for v in val
-        write(ser.io, htol(real(v)))
-        write(ser.io, htol(imag(v)))
-    end
+    write_complex_array_data(ser.io, val)
 end
 
 # Handle BEVE type tags (variants)
@@ -339,36 +365,32 @@ function beve_value!(ser::BeveSerializer, val::BEVE.BeveMatrix)
         # Use I64_ARRAY for compatibility with Glaze/Eigen
         write(ser.io, I64_ARRAY)
         write_size(ser.io, 2)
-        for extent in val.extents
-            write(ser.io, htol(Int64(extent)))
-        end
+        # Use bulk write for extents
+        extents_i64 = Int64[val.extents[1], val.extents[2]]
+        write_array_data(ser.io, extents_i64)
     else
         # For non-2D matrices, choose the smallest unsigned type that can hold the max extent
         max_extent = maximum(val.extents)
         if max_extent <= typemax(UInt8)
             write(ser.io, U8_ARRAY)
             write_size(ser.io, length(val.extents))
-            for extent in val.extents
-                write(ser.io, UInt8(extent))
-            end
+            extents_u8 = UInt8.(val.extents)
+            write_array_data(ser.io, extents_u8)
         elseif max_extent <= typemax(UInt16)
             write(ser.io, U16_ARRAY)
             write_size(ser.io, length(val.extents))
-            for extent in val.extents
-                write(ser.io, htol(UInt16(extent)))
-            end
+            extents_u16 = UInt16.(val.extents)
+            write_array_data(ser.io, extents_u16)
         elseif max_extent <= typemax(UInt32)
             write(ser.io, U32_ARRAY)
             write_size(ser.io, length(val.extents))
-            for extent in val.extents
-                write(ser.io, htol(UInt32(extent)))
-            end
+            extents_u32 = UInt32.(val.extents)
+            write_array_data(ser.io, extents_u32)
         else
             write(ser.io, U64_ARRAY)
             write_size(ser.io, length(val.extents))
-            for extent in val.extents
-                write(ser.io, htol(UInt64(extent)))
-            end
+            extents_u64 = UInt64.(val.extents)
+            write_array_data(ser.io, extents_u64)
         end
     end
     

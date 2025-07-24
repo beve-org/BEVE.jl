@@ -75,6 +75,25 @@ function read_string_data(deser::BeveDeserializer)::String
     return String(bytes)
 end
 
+# Helper function for bulk array reads with endianness conversion
+@inline function read_array_data!(io::IO, result::Vector{T}) where T <: Union{Int8, UInt8}
+    # Int8 and UInt8 don't need endianness conversion
+    read!(io, result)
+end
+
+@inline function read_array_data!(io::IO, result::Vector{T}) where T <: Union{Int16, Int32, Int64, UInt16, UInt32, UInt64, Float32, Float64}
+    if ENDIAN_BOM == 0x04030201  # Little endian system
+        # Direct read without conversion
+        read!(io, result)
+    else
+        # Big endian system - read then convert
+        read!(io, result)
+        @inbounds for i in 1:length(result)
+            result[i] = ltoh(result[i])
+        end
+    end
+end
+
 function parse_value(deser::BeveDeserializer)
     header = read_byte!(deser)
     
@@ -201,18 +220,34 @@ function parse_complex(deser::BeveDeserializer)
         
         if byte_count == 4
             result = Vector{ComplexF32}(undef, size)
-            for i in 1:size
-                real = ltoh(read(deser.io, Float32))
-                imag = ltoh(read(deser.io, Float32))
-                result[i] = ComplexF32(real, imag)
+            if ENDIAN_BOM == 0x04030201  # Little endian system
+                # Direct read of complex array as interleaved real/imag values
+                unsafe_read(deser.io, pointer(result), size * sizeof(ComplexF32))
+            else
+                # Big endian - need conversion
+                buffer = Vector{Float32}(undef, 2 * size)
+                read!(deser.io, buffer)
+                @inbounds for i in 1:size
+                    real_val = ltoh(buffer[2i-1])
+                    imag_val = ltoh(buffer[2i])
+                    result[i] = ComplexF32(real_val, imag_val)
+                end
             end
             return result
         else  # byte_count == 8
             result = Vector{ComplexF64}(undef, size)
-            for i in 1:size
-                real = ltoh(read(deser.io, Float64))
-                imag = ltoh(read(deser.io, Float64))
-                result[i] = ComplexF64(real, imag)
+            if ENDIAN_BOM == 0x04030201  # Little endian system
+                # Direct read of complex array as interleaved real/imag values
+                unsafe_read(deser.io, pointer(result), size * sizeof(ComplexF64))
+            else
+                # Big endian - need conversion
+                buffer = Vector{Float64}(undef, 2 * size)
+                read!(deser.io, buffer)
+                @inbounds for i in 1:size
+                    real_val = ltoh(buffer[2i-1])
+                    imag_val = ltoh(buffer[2i])
+                    result[i] = ComplexF64(real_val, imag_val)
+                end
             end
             return result
         end
@@ -389,106 +424,70 @@ end
 function parse_f32_array(deser::BeveDeserializer)::Vector{Float32}
     size = read_size(deser)
     result = Vector{Float32}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, Float32))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_f64_array(deser::BeveDeserializer)::Vector{Float64}
     size = read_size(deser)
     result = Vector{Float64}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, Float64))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_i8_array(deser::BeveDeserializer)::Vector{Int8}
     size = read_size(deser)
     result = Vector{Int8}(undef, size)
-    
-    for i in 1:size
-        result[i] = read(deser.io, Int8)
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_i16_array(deser::BeveDeserializer)::Vector{Int16}
     size = read_size(deser)
     result = Vector{Int16}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, Int16))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_i32_array(deser::BeveDeserializer)::Vector{Int32}
     size = read_size(deser)
     result = Vector{Int32}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, Int32))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_i64_array(deser::BeveDeserializer)::Vector{Int64}
     size = read_size(deser)
     result = Vector{Int64}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, Int64))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_u8_array(deser::BeveDeserializer)::Vector{UInt8}
     size = read_size(deser)
     result = Vector{UInt8}(undef, size)
-    read!(deser.io, result)
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_u16_array(deser::BeveDeserializer)::Vector{UInt16}
     size = read_size(deser)
     result = Vector{UInt16}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, UInt16))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_u32_array(deser::BeveDeserializer)::Vector{UInt32}
     size = read_size(deser)
     result = Vector{UInt32}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, UInt32))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
 function parse_u64_array(deser::BeveDeserializer)::Vector{UInt64}
     size = read_size(deser)
     result = Vector{UInt64}(undef, size)
-    
-    for i in 1:size
-        result[i] = ltoh(read(deser.io, UInt64))
-    end
-    
+    read_array_data!(deser.io, result)
     return result
 end
 
