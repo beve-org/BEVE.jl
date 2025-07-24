@@ -140,6 +140,41 @@ function beve_value!(ser::BeveSerializer, val::AbstractString)
     beve_value!(ser, String(val))
 end
 
+# Complex numbers
+function beve_value!(ser::BeveSerializer, val::ComplexF32)
+    write(ser.io, COMPLEX)
+    # Complex header byte per BEVE spec:
+    # - Bits 0-2: single/array (0 = single complex number)
+    # - Bits 3-4: type (0 = floating point)
+    # - Bits 5-7: byte count index (2 = 4 bytes for Float32)
+    # Result: 0b010'00'000 = 0x40
+    write(ser.io, UInt8(0x40))
+    write(ser.io, htol(real(val)))
+    write(ser.io, htol(imag(val)))
+end
+
+function beve_value!(ser::BeveSerializer, val::ComplexF64)
+    write(ser.io, COMPLEX)
+    # Complex header byte per BEVE spec:
+    # - Bits 0-2: single/array (0 = single complex number)
+    # - Bits 3-4: type (0 = floating point)
+    # - Bits 5-7: byte count index (3 = 8 bytes for Float64)
+    # Result: 0b011'00'000 = 0x60
+    write(ser.io, UInt8(0x60))
+    write(ser.io, htol(real(val)))
+    write(ser.io, htol(imag(val)))
+end
+
+function beve_value!(ser::BeveSerializer, val::Complex{T}) where T
+    if T == Float32
+        beve_value!(ser, ComplexF32(val))
+    elseif T == Float64
+        beve_value!(ser, ComplexF64(val))
+    else
+        error("Unsupported complex type: Complex{$T}")
+    end
+end
+
 # Arrays
 function beve_value!(ser::BeveSerializer, val::Vector{Bool})
     write(ser.io, BOOL_ARRAY)
@@ -247,6 +282,37 @@ function beve_value!(ser::BeveSerializer, val::Vector{UInt64})
     end
 end
 
+# Complex arrays
+function beve_value!(ser::BeveSerializer, val::Vector{ComplexF32})
+    write(ser.io, COMPLEX)
+    # Complex header byte per BEVE spec:
+    # - Bits 0-2: single/array (1 = complex array)
+    # - Bits 3-4: type (0 = floating point)
+    # - Bits 5-7: byte count index (2 = 4 bytes for Float32)
+    # Result: 0b010'00'001 = 0x41
+    write(ser.io, UInt8(0x41))
+    write_size(ser.io, length(val))
+    for v in val
+        write(ser.io, htol(real(v)))
+        write(ser.io, htol(imag(v)))
+    end
+end
+
+function beve_value!(ser::BeveSerializer, val::Vector{ComplexF64})
+    write(ser.io, COMPLEX)
+    # Complex header byte per BEVE spec:
+    # - Bits 0-2: single/array (1 = complex array)
+    # - Bits 3-4: type (0 = floating point)
+    # - Bits 5-7: byte count index (3 = 8 bytes for Float64)
+    # Result: 0b011'00'001 = 0x61
+    write(ser.io, UInt8(0x61))
+    write_size(ser.io, length(val))
+    for v in val
+        write(ser.io, htol(real(v)))
+        write(ser.io, htol(imag(v)))
+    end
+end
+
 # Handle generic arrays (mixed types)
 function beve_value!(ser::BeveSerializer, val::Vector)
     write(ser.io, GENERIC_ARRAY)
@@ -278,7 +344,24 @@ end
 
 # Handle struct serialization
 function beve_value!(ser::BeveSerializer, val::T) where T
-    if !isempty(fieldnames(T))
+    # Check if it's a complex number type first
+    if T <: Complex
+        if T == ComplexF32 || T == Complex{Float32}
+            write(ser.io, COMPLEX)
+            # Complex header: single=0, float=0, byte_count=2 (4 bytes) => 0x40
+            write(ser.io, UInt8(0x40))
+            write(ser.io, htol(Float32(real(val))))
+            write(ser.io, htol(Float32(imag(val))))
+        elseif T == ComplexF64 || T == Complex{Float64}
+            write(ser.io, COMPLEX)
+            # Complex header: single=0, float=0, byte_count=3 (8 bytes) => 0x60
+            write(ser.io, UInt8(0x60))
+            write(ser.io, htol(Float64(real(val))))
+            write(ser.io, htol(Float64(imag(val))))
+        else
+            error("Unsupported complex type: $T")
+        end
+    elseif !isempty(fieldnames(T))
         # Serialize as a string-keyed object
         write(ser.io, STRING_OBJECT)
         fields = fieldnames(T)

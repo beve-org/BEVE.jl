@@ -138,8 +138,71 @@ function parse_value(deser::BeveDeserializer)
         return parse_u64_array(deser)
     elseif header == GENERIC_ARRAY
         return parse_generic_array(deser)
+    elseif header == COMPLEX
+        return parse_complex(deser)
     else
         throw(BeveError("Unsupported header: $(header_name(header)) (0x$(string(header, base=16)))"))
+    end
+end
+
+function parse_complex(deser::BeveDeserializer)
+    # Read the complex header byte
+    complex_header = read_byte!(deser)
+    
+    # Extract fields from complex header byte per BEVE spec:
+    # - Bits 0-2: single/array indicator (0 = single, 1 = array)
+    # - Bits 3-4: type (0 = float, 1 = signed int, 2 = unsigned int)
+    # - Bits 5-7: byte count index (0=1, 1=2, 2=4, 3=8, etc.)
+    
+    is_array = complex_header & 0x01  # Bit 0 indicates array
+    type_bits = (complex_header >> 3) & 0x03  # Bits 3-4 for type
+    byte_count_idx = (complex_header >> 5) & 0x07  # Bits 5-7 for byte count
+    
+    # Only floating point complex numbers are currently supported
+    if type_bits != 0
+        throw(BeveError("Only floating point complex numbers are supported"))
+    end
+    
+    # Calculate byte count from index: 1 << byte_count_idx
+    byte_count = 1 << byte_count_idx
+    
+    # Validate expected byte counts for complex floats
+    if byte_count != 4 && byte_count != 8
+        throw(BeveError("Unsupported complex float size: $byte_count bytes"))
+    end
+    
+    if is_array != 0
+        # Handle complex arrays
+        size = read_size(deser)
+        
+        if byte_count == 4
+            result = Vector{ComplexF32}(undef, size)
+            for i in 1:size
+                real = ltoh(read(deser.io, Float32))
+                imag = ltoh(read(deser.io, Float32))
+                result[i] = ComplexF32(real, imag)
+            end
+            return result
+        else  # byte_count == 8
+            result = Vector{ComplexF64}(undef, size)
+            for i in 1:size
+                real = ltoh(read(deser.io, Float64))
+                imag = ltoh(read(deser.io, Float64))
+                result[i] = ComplexF64(real, imag)
+            end
+            return result
+        end
+    end
+    
+    # Single complex number
+    if byte_count == 4
+        real = ltoh(read(deser.io, Float32))
+        imag = ltoh(read(deser.io, Float32))
+        return ComplexF32(real, imag)
+    else  # byte_count == 8
+        real = ltoh(read(deser.io, Float64))
+        imag = ltoh(read(deser.io, Float64))
+        return ComplexF64(real, imag)
     end
 end
 
