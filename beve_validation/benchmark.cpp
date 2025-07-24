@@ -109,7 +109,6 @@ BenchmarkResult benchmark_type(const std::string& name, const T& data, int itera
    write_times.reserve(iterations);
    
    for (int i = 0; i < iterations; ++i) {
-      buffer.clear();
       auto start = std::chrono::high_resolution_clock::now();
       auto ec = glz::write_beve(data, buffer);
       auto end = std::chrono::high_resolution_clock::now();
@@ -127,8 +126,8 @@ BenchmarkResult benchmark_type(const std::string& name, const T& data, int itera
    std::vector<double> read_times;
    read_times.reserve(iterations);
    
+   T loaded;
    for (int i = 0; i < iterations; ++i) {
-      T loaded;
       auto start = std::chrono::high_resolution_clock::now();
       auto ec = glz::read_beve(loaded, buffer);
       auto end = std::chrono::high_resolution_clock::now();
