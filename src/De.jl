@@ -140,6 +140,8 @@ function parse_value(deser::BeveDeserializer)
         return parse_generic_array(deser)
     elseif header == COMPLEX
         return parse_complex(deser)
+    elseif header == TAG
+        return parse_type_tag(deser)
     else
         throw(BeveError("Unsupported header: $(header_name(header)) (0x$(string(header, base=16)))"))
     end
@@ -204,6 +206,20 @@ function parse_complex(deser::BeveDeserializer)
         imag = ltoh(read(deser.io, Float64))
         return ComplexF64(real, imag)
     end
+end
+
+function parse_type_tag(deser::BeveDeserializer)
+    # Per BEVE spec: Type tags store a type index and a value
+    # Layout: HEADER | SIZE (type tag index) | VALUE
+    
+    # Read the type index using compressed size format
+    type_index = read_size(deser)
+    
+    # Read the value (can be any BEVE type)
+    value = parse_value(deser)
+    
+    # Return as a BeveTypeTag struct
+    return BEVE.BeveTypeTag(type_index, value)
 end
 
 function parse_string_object(deser::BeveDeserializer)::Dict{String, Any}

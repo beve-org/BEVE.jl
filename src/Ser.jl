@@ -313,6 +313,15 @@ function beve_value!(ser::BeveSerializer, val::Vector{ComplexF64})
     end
 end
 
+# Handle BEVE type tags (variants)
+function beve_value!(ser::BeveSerializer, val::BEVE.BeveTypeTag)
+    write(ser.io, TAG)
+    # Write the type index using compressed size format
+    write_size(ser.io, val.index)
+    # Write the value (can be any BEVE type)
+    beve_value!(ser, val.value)
+end
+
 # Handle generic arrays (mixed types)
 function beve_value!(ser::BeveSerializer, val::Vector)
     write(ser.io, GENERIC_ARRAY)
