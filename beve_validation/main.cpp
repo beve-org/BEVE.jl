@@ -9,6 +9,8 @@
 #include <optional>
 #include <variant>
 #include <array>
+#include <chrono>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -155,6 +157,41 @@ struct AllTypes {
    OptionalTypes optionals;
    VariantTypes variants;
    NestedStruct nested;
+};
+
+struct LargeArrayTypes {
+   std::vector<float> large_float_vec;
+   std::vector<double> large_double_vec;
+   std::vector<std::complex<float>> large_complex_float_vec;
+   std::vector<std::complex<double>> large_complex_double_vec;
+   
+   LargeArrayTypes() {
+      // Initialize with 10,000 elements each
+      const size_t size = 10000;
+      
+      large_float_vec.reserve(size);
+      large_double_vec.reserve(size);
+      large_complex_float_vec.reserve(size);
+      large_complex_double_vec.reserve(size);
+      
+      for (size_t i = 0; i < size; ++i) {
+         large_float_vec.push_back(static_cast<float>(i) * 0.1f);
+         large_double_vec.push_back(static_cast<double>(i) * 0.01);
+         large_complex_float_vec.push_back({static_cast<float>(i), static_cast<float>(i) * 0.5f});
+         large_complex_double_vec.push_back({static_cast<double>(i) * 0.1, static_cast<double>(i) * 0.2});
+      }
+   }
+};
+
+template <>
+struct glz::meta<LargeArrayTypes> {
+   using T = LargeArrayTypes;
+   static constexpr auto value = object(
+      "large_float_vec", &T::large_float_vec,
+      "large_double_vec", &T::large_double_vec,
+      "large_complex_float_vec", &T::large_complex_float_vec,
+      "large_complex_double_vec", &T::large_complex_double_vec
+   );
 };
 
 template <>
@@ -308,6 +345,51 @@ void test_all_types() {
    }
 }
 
+void test_large_arrays() {
+   std::cout << "\n=== Testing Large Arrays ===" << std::endl;
+   
+   LargeArrayTypes original;
+   std::cout << "Created arrays with " << original.large_float_vec.size() << " elements each" << std::endl;
+   
+   auto start = std::chrono::high_resolution_clock::now();
+   
+   if (write_beve_file(original, "large_arrays.beve")) {
+      auto write_end = std::chrono::high_resolution_clock::now();
+      auto write_ms = std::chrono::duration_cast<std::chrono::milliseconds>(write_end - start).count();
+      std::cout << "Write time: " << write_ms << " ms" << std::endl;
+      
+      LargeArrayTypes loaded;
+      auto read_start = std::chrono::high_resolution_clock::now();
+      
+      if (read_beve_file(loaded, "large_arrays.beve")) {
+         auto read_end = std::chrono::high_resolution_clock::now();
+         auto read_ms = std::chrono::duration_cast<std::chrono::milliseconds>(read_end - read_start).count();
+         std::cout << "Read time: " << read_ms << " ms" << std::endl;
+         
+         // Verify data integrity
+         bool float_ok = loaded.large_float_vec.size() == original.large_float_vec.size() &&
+                        std::equal(original.large_float_vec.begin(), original.large_float_vec.end(),
+                                 loaded.large_float_vec.begin());
+         bool double_ok = loaded.large_double_vec.size() == original.large_double_vec.size() &&
+                         std::equal(original.large_double_vec.begin(), original.large_double_vec.end(),
+                                  loaded.large_double_vec.begin());
+         bool complex_float_ok = loaded.large_complex_float_vec.size() == original.large_complex_float_vec.size() &&
+                                std::equal(original.large_complex_float_vec.begin(), original.large_complex_float_vec.end(),
+                                         loaded.large_complex_float_vec.begin());
+         bool complex_double_ok = loaded.large_complex_double_vec.size() == original.large_complex_double_vec.size() &&
+                                 std::equal(original.large_complex_double_vec.begin(), original.large_complex_double_vec.end(),
+                                          loaded.large_complex_double_vec.begin());
+         
+         std::cout << "Verification: "
+                   << (float_ok ? "✓" : "✗") << " float_vec, "
+                   << (double_ok ? "✓" : "✗") << " double_vec, "
+                   << (complex_float_ok ? "✓" : "✗") << " complex_float_vec, "
+                   << (complex_double_ok ? "✓" : "✗") << " complex_double_vec"
+                   << std::endl;
+      }
+   }
+}
+
 void generate_test_files() {
    std::cout << "\n=== Generating Test Files for Julia ===" << std::endl;
    
@@ -336,6 +418,9 @@ void generate_test_files() {
    
    AllTypes all;
    write_beve_file(all, "cpp_generated/all_types.beve");
+   
+   LargeArrayTypes large;
+   write_beve_file(large, "cpp_generated/large_arrays.beve");
 }
 
 void test_julia_generated_files() {
@@ -379,6 +464,7 @@ int main(int argc, char* argv[]) {
    test_array_types();
    test_complex_types();
    test_all_types();
+   test_large_arrays();
    
    generate_test_files();
    

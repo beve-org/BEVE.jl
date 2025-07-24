@@ -60,6 +60,13 @@ struct AllTypes
     nested::NestedStruct
 end
 
+struct LargeArrayTypes
+    large_float_vec::Vector{Float32}
+    large_double_vec::Vector{Float64}
+    large_complex_float_vec::Vector{ComplexF32}
+    large_complex_double_vec::Vector{ComplexF64}
+end
+
 # Create test data
 function create_basic_types()
     BasicTypes(
@@ -131,6 +138,23 @@ function create_all_types()
     )
 end
 
+function create_large_array_types()
+    # Create arrays with 10,000 elements each
+    size = 10000
+    
+    large_float_vec = Float32[Float32(i) * 0.1f0 for i in 0:size-1]
+    large_double_vec = Float64[Float64(i) * 0.01 for i in 0:size-1]
+    large_complex_float_vec = ComplexF32[ComplexF32(Float32(i), Float32(i) * 0.5f0) for i in 0:size-1]
+    large_complex_double_vec = ComplexF64[ComplexF64(Float64(i) * 0.1, Float64(i) * 0.2) for i in 0:size-1]
+    
+    LargeArrayTypes(
+        large_float_vec,
+        large_double_vec,
+        large_complex_float_vec,
+        large_complex_double_vec
+    )
+end
+
 # Write BEVE file
 function write_beve_file(data, filename)
     println("Writing $filename")
@@ -182,6 +206,14 @@ function generate_julia_test_files()
     # Generate all types
     all = create_all_types()
     write_beve_file(all, "julia_generated/all_types.beve")
+    
+    # Generate large array types
+    large = create_large_array_types()
+    println("\n  Creating large arrays with $(length(large.large_float_vec)) elements each")
+    t0 = time()
+    beve_data = write_beve_file(large, "julia_generated/large_arrays.beve")
+    write_time = time() - t0
+    println("  Write time: $(round(write_time * 1000, digits=1)) ms")
 end
 
 # Test reading C++ generated files
@@ -238,6 +270,43 @@ function test_cpp_generated_files()
             println("  Error: $e")
         end
     end
+    
+    # Test large arrays
+    if isfile("$cpp_dir/large_arrays.beve")
+        println("\nTesting large_arrays.beve")
+        t0 = time()
+        beve_data = read_beve_file("$cpp_dir/large_arrays.beve")
+        read_time = time() - t0
+        println("  File read time: $(round(read_time * 1000, digits=1)) ms")
+        
+        try
+            t0 = time()
+            result = from_beve(beve_data)
+            deser_time = time() - t0
+            println("  Deserialization time: $(round(deser_time * 1000, digits=1)) ms")
+            println("  Keys: ", keys(result))
+            
+            # Try typed deserialization
+            t0 = time()
+            typed_result = deser_beve(LargeArrayTypes, beve_data)
+            typed_deser_time = time() - t0
+            println("  Typed deserialization time: $(round(typed_deser_time * 1000, digits=1)) ms")
+            
+            # Verify sizes
+            println("  Array sizes: float=$(length(typed_result.large_float_vec)), " *
+                    "double=$(length(typed_result.large_double_vec)), " *
+                    "complex_float=$(length(typed_result.large_complex_float_vec)), " *
+                    "complex_double=$(length(typed_result.large_complex_double_vec))")
+            
+            # Spot check some values
+            if length(typed_result.large_float_vec) >= 10
+                println("  First 5 floats: ", typed_result.large_float_vec[1:5])
+                println("  First 3 complex floats: ", typed_result.large_complex_float_vec[1:3])
+            end
+        catch e
+            println("  Error: $e")
+        end
+    end
 end
 
 # Test round-trip serialization
@@ -267,6 +336,29 @@ function test_round_trip()
     @test typed_result.int_vec == arrays.int_vec
     @test typed_result.string_vec == arrays.string_vec
     println("  ✓ ArrayTypes round-trip successful")
+    
+    # Test large arrays
+    println("\nTesting LargeArrayTypes round-trip")
+    large = create_large_array_types()
+    println("  Array size: $(length(large.large_float_vec)) elements")
+    
+    t0 = time()
+    beve_data = to_beve(large)
+    ser_time = time() - t0
+    println("  Serialization time: $(round(ser_time * 1000, digits=1)) ms")
+    println("  Serialized size: $(length(beve_data)) bytes")
+    
+    t0 = time()
+    typed_result = deser_beve(LargeArrayTypes, beve_data)
+    deser_time = time() - t0
+    println("  Deserialization time: $(round(deser_time * 1000, digits=1)) ms")
+    
+    # Verify data integrity
+    @test typed_result.large_float_vec == large.large_float_vec
+    @test typed_result.large_double_vec == large.large_double_vec
+    @test typed_result.large_complex_float_vec == large.large_complex_float_vec
+    @test typed_result.large_complex_double_vec == large.large_complex_double_vec
+    println("  ✓ LargeArrayTypes round-trip successful")
 end
 
 # Main test function

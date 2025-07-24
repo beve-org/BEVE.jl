@@ -18,10 +18,16 @@ FetchContent_MakeAvailable(glaze)
 add_executable(beve_validator main.cpp)
 target_link_libraries(beve_validator PRIVATE glaze::glaze)
 
+add_executable(beve_benchmark benchmark.cpp)
+target_link_libraries(beve_benchmark PRIVATE glaze::glaze)
+
 target_compile_features(beve_validator PRIVATE cxx_std_23)
+target_compile_features(beve_benchmark PRIVATE cxx_std_23)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(beve_validator PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(beve_benchmark PRIVATE -Wall -Wextra -Wpedantic)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     target_compile_options(beve_validator PRIVATE /W4)
+    target_compile_options(beve_benchmark PRIVATE /W4)
 endif()

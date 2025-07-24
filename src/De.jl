@@ -402,7 +402,10 @@ julia> person = deser_beve(Person, beve_data)
 function deser_beve(::Type{T}, data::Vector{UInt8}) where T
     parsed = from_beve(data)
     
-    if parsed isa Dict{String, Any}
+    # If T is a Dict type and parsed is also a Dict, just convert
+    if T <: Dict && parsed isa Dict
+        return convert(T, parsed)
+    elseif parsed isa Dict{String, Any}
         # Try to reconstruct the struct from the dictionary
         return reconstruct_struct(T, parsed)
     else
@@ -427,6 +430,9 @@ function reconstruct_struct(::Type{T}, data::Dict{String, Any}) where T
                     push!(field_values, string(field_val))
                 elseif field_type <: Number
                     push!(field_values, field_type(field_val))
+                elseif field_type <: Dict && field_val isa Dict
+                    # Convert dict to specific dict type
+                    push!(field_values, convert(field_type, field_val))
                 elseif field_val isa Dict{String, Any} && !isempty(fieldnames(field_type))
                     # Recursively reconstruct nested struct
                     push!(field_values, reconstruct_struct(field_type, field_val))
