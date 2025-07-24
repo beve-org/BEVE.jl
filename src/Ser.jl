@@ -395,9 +395,61 @@ function beve_value!(ser::BeveSerializer, val::Dict{String, T}) where T
     end
 end
 
+# Handle integer-keyed dictionaries
+function beve_value!(ser::BeveSerializer, val::Dict{K, V}) where {K <: Integer, V}
+    # Select appropriate header based on key type
+    header = if K == Int8
+        I8_OBJECT
+    elseif K == Int16
+        I16_OBJECT
+    elseif K == Int32
+        I32_OBJECT
+    elseif K == Int64
+        I64_OBJECT
+    elseif K == Int128
+        I128_OBJECT
+    elseif K == UInt8
+        U8_OBJECT
+    elseif K == UInt16
+        U16_OBJECT
+    elseif K == UInt32
+        U32_OBJECT
+    elseif K == UInt64
+        U64_OBJECT
+    elseif K == UInt128
+        U128_OBJECT
+    else
+        # Fall back to string object for other integer types
+        return beve_value!(ser, Dict{String, V}(string(k) => v for (k, v) in val))
+    end
+    
+    write(ser.io, header)
+    write_size(ser.io, length(val))
+    
+    for (k, v) in val
+        # Write the integer key
+        if K == Int8 || K == UInt8
+            write(ser.io, k)
+        else
+            write(ser.io, htol(k))
+        end
+        beve_value!(ser, v)
+    end
+end
+
 # Handle generic dictionaries
 function beve_value!(ser::BeveSerializer, val::AbstractDict)
-    # Convert to string-keyed dict for now
+    # Check if all keys are of the same integer type
+    if !isempty(val)
+        key_type = typeof(first(keys(val)))
+        if key_type <: Integer && all(k -> typeof(k) == key_type, keys(val))
+            # Convert to properly typed integer dictionary
+            typed_dict = Dict{key_type, Any}(k => v for (k, v) in val)
+            return beve_value!(ser, typed_dict)
+        end
+    end
+    
+    # Otherwise convert to string-keyed dict
     string_dict = Dict{String, Any}()
     for (k, v) in val
         string_dict[string(k)] = v

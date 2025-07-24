@@ -24,6 +24,9 @@ target_link_libraries(beve_benchmark PRIVATE glaze::glaze)
 add_executable(test_matrices test_matrices.cpp)
 target_link_libraries(test_matrices PRIVATE glaze::glaze)
 
+add_executable(test_integer_objects test_integer_objects.cpp)
+target_link_libraries(test_integer_objects PRIVATE glaze::glaze)
+
 # Find Eigen3 package
 find_package(Eigen3 QUIET)
 
@@ -63,13 +66,16 @@ endif()
 target_compile_features(beve_validator PRIVATE cxx_std_23)
 target_compile_features(beve_benchmark PRIVATE cxx_std_23)
 target_compile_features(test_matrices PRIVATE cxx_std_23)
+target_compile_features(test_integer_objects PRIVATE cxx_std_23)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(beve_validator PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(beve_benchmark PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_matrices PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_integer_objects PRIVATE -Wall -Wextra -Wpedantic)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     target_compile_options(beve_validator PRIVATE /W4)
     target_compile_options(beve_benchmark PRIVATE /W4)
     target_compile_options(test_matrices PRIVATE /W4)
+    target_compile_options(test_integer_objects PRIVATE /W4)
 endif()

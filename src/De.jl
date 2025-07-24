@@ -112,6 +112,26 @@ function parse_value(deser::BeveDeserializer)
         return read_string_data(deser)
     elseif header == STRING_OBJECT
         return parse_string_object(deser)
+    elseif header == I8_OBJECT
+        return parse_integer_object(deser, Int8)
+    elseif header == I16_OBJECT
+        return parse_integer_object(deser, Int16)
+    elseif header == I32_OBJECT
+        return parse_integer_object(deser, Int32)
+    elseif header == I64_OBJECT
+        return parse_integer_object(deser, Int64)
+    elseif header == I128_OBJECT
+        return parse_integer_object(deser, Int128)
+    elseif header == U8_OBJECT
+        return parse_integer_object(deser, UInt8)
+    elseif header == U16_OBJECT
+        return parse_integer_object(deser, UInt16)
+    elseif header == U32_OBJECT
+        return parse_integer_object(deser, UInt32)
+    elseif header == U64_OBJECT
+        return parse_integer_object(deser, UInt64)
+    elseif header == U128_OBJECT
+        return parse_integer_object(deser, UInt128)
     elseif header == BOOL_ARRAY
         return parse_bool_array(deser)
     elseif header == STRING_ARRAY
@@ -321,6 +341,24 @@ function parse_string_object(deser::BeveDeserializer)::Dict{String, Any}
     return result
 end
 
+function parse_integer_object(deser::BeveDeserializer, ::Type{T}) where T <: Integer
+    size = read_size(deser)
+    result = Dict{T, Any}()
+    
+    for _ in 1:size
+        # Read the integer key based on type
+        key = if T == Int8 || T == UInt8
+            read(deser.io, T)
+        else
+            ltoh(read(deser.io, T))
+        end
+        value = parse_value(deser)
+        result[key] = value
+    end
+    
+    return result
+end
+
 function parse_bool_array(deser::BeveDeserializer)::Vector{Bool}
     size = read_size(deser)
     byte_count = (size + 7) ÷ 8
@@ -508,8 +546,14 @@ function deser_beve(::Type{T}, data::Vector{UInt8}) where T
     if T <: Dict && parsed isa Dict
         return convert(T, parsed)
     elseif parsed isa Dict{String, Any}
-        # Try to reconstruct the struct from the dictionary
+        # Try to reconstruct the struct from the string dictionary
         return reconstruct_struct(T, parsed)
+    elseif parsed isa Dict && T <: Dict
+        # Handle integer-keyed dictionaries
+        return convert(T, parsed)
+    elseif parsed isa Dict
+        # If parsed is an integer-keyed dict but T is not a Dict, error
+        throw(BeveError("Cannot convert integer-keyed dictionary to type $T"))
     else
         return T(parsed)
     end
