@@ -322,6 +322,60 @@ function beve_value!(ser::BeveSerializer, val::BEVE.BeveTypeTag)
     beve_value!(ser, val.value)
 end
 
+# Handle BEVE matrices
+function beve_value!(ser::BeveSerializer, val::BEVE.BeveMatrix)
+    write(ser.io, MATRIX)
+    
+    # Write matrix header byte per BEVE spec
+    # The first bit denotes the data layout: 0 = row-major, 1 = column-major
+    # Since only bit 0 is used, byte values are 0x00 or 0x01
+    matrix_header = UInt8(val.layout == BEVE.LayoutLeft ? 1 : 0)
+    write(ser.io, matrix_header)
+    
+    # Write extents as a typed array
+    # BEVE spec says "typed array of unsigned integers" but Glaze uses signed I64_ARRAY
+    # for 2D matrices because Eigen::Index is std::ptrdiff_t (signed)
+    if length(val.extents) == 2
+        # Use I64_ARRAY for compatibility with Glaze/Eigen
+        write(ser.io, I64_ARRAY)
+        write_size(ser.io, 2)
+        for extent in val.extents
+            write(ser.io, htol(Int64(extent)))
+        end
+    else
+        # For non-2D matrices, choose the smallest unsigned type that can hold the max extent
+        max_extent = maximum(val.extents)
+        if max_extent <= typemax(UInt8)
+            write(ser.io, U8_ARRAY)
+            write_size(ser.io, length(val.extents))
+            for extent in val.extents
+                write(ser.io, UInt8(extent))
+            end
+        elseif max_extent <= typemax(UInt16)
+            write(ser.io, U16_ARRAY)
+            write_size(ser.io, length(val.extents))
+            for extent in val.extents
+                write(ser.io, htol(UInt16(extent)))
+            end
+        elseif max_extent <= typemax(UInt32)
+            write(ser.io, U32_ARRAY)
+            write_size(ser.io, length(val.extents))
+            for extent in val.extents
+                write(ser.io, htol(UInt32(extent)))
+            end
+        else
+            write(ser.io, U64_ARRAY)
+            write_size(ser.io, length(val.extents))
+            for extent in val.extents
+                write(ser.io, htol(UInt64(extent)))
+            end
+        end
+    end
+    
+    # Write the data as a typed array
+    beve_value!(ser, val.data)
+end
+
 # Handle generic arrays (mixed types)
 function beve_value!(ser::BeveSerializer, val::Vector)
     write(ser.io, GENERIC_ARRAY)

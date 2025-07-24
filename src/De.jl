@@ -142,6 +142,8 @@ function parse_value(deser::BeveDeserializer)
         return parse_complex(deser)
     elseif header == TAG
         return parse_type_tag(deser)
+    elseif header == MATRIX
+        return parse_matrix(deser)
     else
         throw(BeveError("Unsupported header: $(header_name(header)) (0x$(string(header, base=16)))"))
     end
@@ -220,6 +222,90 @@ function parse_type_tag(deser::BeveDeserializer)
     
     # Return as a BeveTypeTag struct
     return BEVE.BeveTypeTag(type_index, value)
+end
+
+function parse_matrix(deser::BeveDeserializer)
+    # Per BEVE spec: Matrices have a matrix header byte, extents, and value
+    # Layout: HEADER | MATRIX HEADER | EXTENTS | VALUE
+    
+    # Read the matrix header byte
+    matrix_header = read_byte!(deser)
+    
+    # Extract layout from the first bit per BEVE spec
+    # 0 = row-major, 1 = column-major
+    # Since only bit 0 is specified, we check the whole byte for 0 or 1
+    layout = matrix_header == 0 ? BEVE.LayoutRight : BEVE.LayoutLeft
+    
+    # Read extents array header
+    # BEVE spec says "typed array of unsigned integers" but implementations may use signed
+    extents_header = read_byte!(deser)
+    
+    # Parse the extents array - accept both signed and unsigned integer arrays
+    if extents_header == U8_ARRAY
+        extents = Int.(parse_u8_array(deser))
+    elseif extents_header == U16_ARRAY
+        extents = Int.(parse_u16_array(deser))
+    elseif extents_header == U32_ARRAY
+        extents = Int.(parse_u32_array(deser))
+    elseif extents_header == U64_ARRAY
+        extents = Int.(parse_u64_array(deser))
+    elseif extents_header == I8_ARRAY
+        extents = Int.(parse_i8_array(deser))
+    elseif extents_header == I16_ARRAY
+        extents = Int.(parse_i16_array(deser))
+    elseif extents_header == I32_ARRAY
+        extents = Int.(parse_i32_array(deser))
+    elseif extents_header == I64_ARRAY
+        extents = Int.(parse_i64_array(deser))
+    else
+        throw(BeveError("Matrix extents must be a typed integer array, got: $(header_name(extents_header))"))
+    end
+    
+    # Read the value (must be a typed array of numerical data)
+    value_header = peek_byte!(deser)
+    
+    # Check if it's a typed numerical array
+    if value_header == F32_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == F64_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == I8_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == I16_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == I32_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == I64_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == U8_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == U16_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == U32_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == U64_ARRAY
+        data = parse_value(deser)
+        return BEVE.BeveMatrix(layout, extents, data)
+    elseif value_header == COMPLEX
+        # Handle complex arrays
+        data = parse_value(deser)
+        if data isa Vector
+            return BEVE.BeveMatrix(layout, extents, data)
+        else
+            throw(BeveError("Matrix value must be an array, got single complex number"))
+        end
+    else
+        throw(BeveError("Matrix value must be a typed array of numerical data, got: $(header_name(value_header))"))
+    end
 end
 
 function parse_string_object(deser::BeveDeserializer)::Dict{String, Any}
