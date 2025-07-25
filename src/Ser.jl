@@ -522,8 +522,12 @@ end
 
 """
     to_beve([f::Function], data) -> Vector{UInt8}
+    to_beve!(io::IOBuffer, data) -> Vector{UInt8}
 
 Serializes any `data` into a BEVE binary format.
+
+The `to_beve!` variant accepts a pre-allocated IOBuffer for better performance
+when serializing multiple objects. The buffer is reset before use.
 
 ## Examples
 
@@ -536,6 +540,10 @@ julia> struct Person
 julia> person = Person("Alice", 30)
 
 julia> beve_data = to_beve(person)
+
+# Using pre-allocated buffer for better performance
+julia> buffer = IOBuffer()
+julia> beve_data = to_beve!(buffer, person)
 ```
 """
 function to_beve(data)::Vector{UInt8}
@@ -547,6 +555,23 @@ end
 
 function to_beve(f::Function, data)::Vector{UInt8}
     io = IOBuffer()
+    ser = BeveSerializer(io)
+    beve_value!(ser, data)
+    return take!(io)
+end
+
+"""
+    to_beve!(io::IOBuffer, data) -> Vector{UInt8}
+
+Serializes data into a BEVE binary format using a pre-allocated IOBuffer.
+The buffer is reset to the beginning before serialization.
+
+This method is more efficient for repeated serializations as it reuses
+the buffer allocation.
+"""
+function to_beve!(io::IOBuffer, data)::Vector{UInt8}
+    seekstart(io)
+    truncate(io, 0)  # Clear any existing data
     ser = BeveSerializer(io)
     beve_value!(ser, data)
     return take!(io)

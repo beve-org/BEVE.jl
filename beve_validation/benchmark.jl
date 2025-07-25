@@ -61,9 +61,12 @@ function benchmark_type(name::String, data, iterations::Int)
     write_times = Float64[]
     sizehint!(write_times, iterations)
     
+    # Pre-allocate IOBuffer for better performance
+    io_buffer = IOBuffer()
+    
     for i in 1:iterations
         t0 = time()
-        buffer = to_beve(data)
+        buffer = to_beve!(io_buffer, data)
         t1 = time()
         push!(write_times, (t1 - t0) * 1000)  # Convert to ms
     end

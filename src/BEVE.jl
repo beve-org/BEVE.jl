@@ -39,7 +39,7 @@ end
 BeveMatrix(layout::MatrixLayout, extents::Vector{Int}, data::Vector{T}) where T = BeveMatrix{T}(layout, extents, data)
 
 # Exports for serialization
-export to_beve, BeveTypeTag, BeveMatrix, MatrixLayout, LayoutRight, LayoutLeft
+export to_beve, to_beve!, BeveTypeTag, BeveMatrix, MatrixLayout, LayoutRight, LayoutLeft
 
 # Exports for deserialization  
 export from_beve, deser_beve
