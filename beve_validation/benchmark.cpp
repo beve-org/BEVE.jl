@@ -206,12 +206,12 @@ int main() {
    // Large float array (100K)
    std::cout << "Benchmarking large float array (100K)..." << std::endl;
    LargeFloatArray large100k(100000);
-   results.push_back(benchmark_type("Float Array 100K", large100k, 50));
+   results.push_back(benchmark_type("Float Array 100K", large100k, 100));
    
    // Large float array (1M)
    std::cout << "Benchmarking large float array (1M)..." << std::endl;
    LargeFloatArray large1m(1000000);
-   results.push_back(benchmark_type("Float Array 1M", large1m, 20));
+   results.push_back(benchmark_type("Float Array 1M", large1m, 100));
    
    // Complex array (10K)
    std::cout << "Benchmarking complex array (10K)..." << std::endl;
@@ -221,7 +221,7 @@ int main() {
    // Complex array (100K)
    std::cout << "Benchmarking complex array (100K)..." << std::endl;
    LargeComplexArray complex100k(100000);
-   results.push_back(benchmark_type("Complex Array 100K", complex100k, 50));
+   results.push_back(benchmark_type("Complex Array 100K", complex100k, 100));
    
    // Print results
    std::cout << "\nResults:\n";

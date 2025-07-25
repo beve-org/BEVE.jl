@@ -128,12 +128,12 @@ function main()
     # Large float array (100K)
     println("Benchmarking large float array (100K)...")
     large100k = create_large_float_array(100000)
-    push!(results, benchmark_type("Float Array 100K", large100k, 50))
+    push!(results, benchmark_type("Float Array 100K", large100k, 100))
     
     # Large float array (1M)
     println("Benchmarking large float array (1M)...")
     large1m = create_large_float_array(1000000)
-    push!(results, benchmark_type("Float Array 1M", large1m, 20))
+    push!(results, benchmark_type("Float Array 1M", large1m, 100))
     
     # Complex array (10K)
     println("Benchmarking complex array (10K)...")
@@ -143,7 +143,7 @@ function main()
     # Complex array (100K)
     println("Benchmarking complex array (100K)...")
     complex100k = create_large_complex_array(100000)
-    push!(results, benchmark_type("Complex Array 100K", complex100k, 50))
+    push!(results, benchmark_type("Complex Array 100K", complex100k, 100))
     
     # Print results
     println("\nResults:")
