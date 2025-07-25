@@ -113,7 +113,7 @@ BenchmarkResult benchmark_type(const std::string& name, const T& data, int itera
    
    for (int i = 0; i < iterations; ++i) {
       auto start = std::chrono::high_resolution_clock::now();
-      [[maybe_unused]] auto ec = glz::write_beve(data, buffer);
+      auto ec = glz::write_beve(data, buffer);
       auto end = std::chrono::high_resolution_clock::now();
       
       if (ec) {
