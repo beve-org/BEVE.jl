@@ -25,6 +25,12 @@ function read_benchmark_results()
     results.WriteSpeedRatio = results.WriteTimeMs_1 ./ results.WriteTimeMs
     results.ReadSpeedRatio = results.ReadTimeMs_1 ./ results.ReadTimeMs
     
+    # Calculate percent deviation (std dev / mean * 100) for both implementations
+    results.WriteStdDevPercent_CPP = (results.WriteStdDevMs ./ results.WriteTimeMs) .* 100
+    results.ReadStdDevPercent_CPP = (results.ReadStdDevMs ./ results.ReadTimeMs) .* 100
+    results.WriteStdDevPercent_Julia = (results.WriteStdDevMs_1 ./ results.WriteTimeMs_1) .* 100
+    results.ReadStdDevPercent_Julia = (results.ReadStdDevMs_1 ./ results.ReadTimeMs_1) .* 100
+    
     return results
 end
 
@@ -58,8 +64,8 @@ function generate_markdown_report(results)
         
         println(io, "## Detailed Results")
         println(io, "")
-        println(io, "| Test | Data Size | C++ Write (ms) | Julia Write (ms) | Write Speed | C++ Read (ms) | Julia Read (ms) | Read Speed |")
-        println(io, "|------|-----------|----------------|------------------|-------------|---------------|-----------------|------------|")
+        println(io, "| Test | Data Size | C++ Write (ms ± %) | Julia Write (ms ± %) | Write Speed | C++ Read (ms ± %) | Julia Read (ms ± %) | Read Speed |")
+        println(io, "|------|-----------|-------------------|---------------------|-------------|------------------|-------------------|------------|")
         
         for row in eachrow(results)
             size_kb = row.DataSizeBytes / 1024
@@ -84,7 +90,12 @@ function generate_markdown_report(results)
                 read_speed_str = "Similar"
             end
             
-            println(io, "| $(row.Name) | $(size_str) | $(round(row.WriteTimeMs, digits=3)) | $(round(row.WriteTimeMs_1, digits=3)) | $(write_speed_str) | $(round(row.ReadTimeMs, digits=3)) | $(round(row.ReadTimeMs_1, digits=3)) | $(read_speed_str) |")
+            cpp_write_str = "$(round(row.WriteTimeMs, digits=3)) ± $(round(row.WriteStdDevPercent_CPP, digits=1))%"
+            julia_write_str = "$(round(row.WriteTimeMs_1, digits=3)) ± $(round(row.WriteStdDevPercent_Julia, digits=1))%"
+            cpp_read_str = "$(round(row.ReadTimeMs, digits=3)) ± $(round(row.ReadStdDevPercent_CPP, digits=1))%"
+            julia_read_str = "$(round(row.ReadTimeMs_1, digits=3)) ± $(round(row.ReadStdDevPercent_Julia, digits=1))%"
+            
+            println(io, "| $(row.Name) | $(size_str) | $(cpp_write_str) | $(julia_write_str) | $(write_speed_str) | $(cpp_read_str) | $(julia_read_str) | $(read_speed_str) |")
         end
         
         println(io, "")
@@ -123,9 +134,27 @@ function generate_markdown_report(results)
         end
         println(io, "")
         
+        println(io, "## Performance Variability")
+        println(io, "")
+        println(io, "Standard deviation as percentage of mean (lower is more consistent):")
+        println(io, "")
+        
+        # Calculate average standard deviations
+        avg_write_stddev_cpp = mean(results.WriteStdDevPercent_CPP)
+        avg_read_stddev_cpp = mean(results.ReadStdDevPercent_CPP)
+        avg_write_stddev_julia = mean(results.WriteStdDevPercent_Julia)
+        avg_read_stddev_julia = mean(results.ReadStdDevPercent_Julia)
+        
+        println(io, "- **C++ Write**: Average ±$(round(avg_write_stddev_cpp, digits=1))% deviation")
+        println(io, "- **C++ Read**: Average ±$(round(avg_read_stddev_cpp, digits=1))% deviation")
+        println(io, "- **Julia Write**: Average ±$(round(avg_write_stddev_julia, digits=1))% deviation")
+        println(io, "- **Julia Read**: Average ±$(round(avg_read_stddev_julia, digits=1))% deviation")
+        println(io, "")
+        
         println(io, "## Notes")
         println(io, "")
         println(io, "- **Speed comparisons**: Shows which implementation is faster and by how many times")
+        println(io, "- **Standard deviation**: Shown as ± percentage of mean time (e.g., \"1.5 ± 10.2%\" means 1.5ms average with 10.2% variability)")
         println(io, "- Tests were run with $(results.Iterations[1]) iterations for small data, decreasing for larger datasets")
         println(io, "- All times are averages across the specified number of iterations")
         println(io, "")

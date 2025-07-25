@@ -8,11 +8,14 @@
 #include <numeric>
 #include <iomanip>
 #include <unordered_map>
+#include <cmath>
 
 struct BenchmarkResult {
    std::string name;
    double write_time_ms;
    double read_time_ms;
+   double write_stddev_ms;
+   double read_stddev_ms;
    size_t data_size_bytes;
    int iterations;
 };
@@ -145,17 +148,35 @@ BenchmarkResult benchmark_type(const std::string& name, const T& data, int itera
    result.write_time_ms = std::accumulate(write_times.begin(), write_times.end(), 0.0) / write_times.size();
    result.read_time_ms = std::accumulate(read_times.begin(), read_times.end(), 0.0) / read_times.size();
    
+   // Calculate standard deviations
+   double write_variance = 0.0;
+   double read_variance = 0.0;
+   
+   for (double t : write_times) {
+      write_variance += (t - result.write_time_ms) * (t - result.write_time_ms);
+   }
+   write_variance /= write_times.size();
+   result.write_stddev_ms = std::sqrt(write_variance);
+   
+   for (double t : read_times) {
+      read_variance += (t - result.read_time_ms) * (t - result.read_time_ms);
+   }
+   read_variance /= read_times.size();
+   result.read_stddev_ms = std::sqrt(read_variance);
+   
    return result;
 }
 
 void write_results(const std::vector<BenchmarkResult>& results) {
    std::ofstream file("cpp_benchmark_results.csv");
-   file << "Name,WriteTimeMs,ReadTimeMs,DataSizeBytes,Iterations\n";
+   file << "Name,WriteTimeMs,ReadTimeMs,WriteStdDevMs,ReadStdDevMs,DataSizeBytes,Iterations\n";
    
    for (const auto& r : results) {
       file << r.name << ","
            << r.write_time_ms << ","
            << r.read_time_ms << ","
+           << r.write_stddev_ms << ","
+           << r.read_stddev_ms << ","
            << r.data_size_bytes << ","
            << r.iterations << "\n";
    }

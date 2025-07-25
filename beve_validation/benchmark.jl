@@ -8,6 +8,8 @@ struct BenchmarkResult
     name::String
     write_time_ms::Float64
     read_time_ms::Float64
+    write_stddev_ms::Float64
+    read_stddev_ms::Float64
     data_size_bytes::Int
     iterations::Int
 end
@@ -64,7 +66,7 @@ function benchmark_type(name::String, data, iterations::Int)
     # Pre-allocate IOBuffer for better performance
     io_buffer = IOBuffer()
     
-    for i in 1:iterations
+    for _ in 1:iterations
         t0 = time()
         buffer = to_beve!(io_buffer, data)
         t1 = time()
@@ -75,7 +77,7 @@ function benchmark_type(name::String, data, iterations::Int)
     read_times = Float64[]
     sizehint!(read_times, iterations)
     
-    for i in 1:iterations
+    for _ in 1:iterations
         t0 = time()
         _ = deser_beve(typeof(data), buffer)
         t1 = time()
@@ -86,6 +88,8 @@ function benchmark_type(name::String, data, iterations::Int)
         name,
         mean(write_times),
         mean(read_times),
+        std(write_times),
+        std(read_times),
         data_size_bytes,
         iterations
     )
@@ -93,9 +97,9 @@ end
 
 function write_results(results::Vector{BenchmarkResult})
     open("julia_benchmark_results.csv", "w") do io
-        println(io, "Name,WriteTimeMs,ReadTimeMs,DataSizeBytes,Iterations")
+        println(io, "Name,WriteTimeMs,ReadTimeMs,WriteStdDevMs,ReadStdDevMs,DataSizeBytes,Iterations")
         for r in results
-            println(io, "$(r.name),$(r.write_time_ms),$(r.read_time_ms),$(r.data_size_bytes),$(r.iterations)")
+            println(io, "$(r.name),$(r.write_time_ms),$(r.read_time_ms),$(r.write_stddev_ms),$(r.read_stddev_ms),$(r.data_size_bytes),$(r.iterations)")
         end
     end
 end
