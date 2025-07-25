@@ -21,9 +21,9 @@ function read_benchmark_results()
     # Join on Name
     results = innerjoin(cpp_results, julia_results, on=:Name, makeunique=true)
     
-    # Calculate performance differences
-    results.WriteTimeDiff = ((results.WriteTimeMs_1 .- results.WriteTimeMs) ./ results.WriteTimeMs) .* 100
-    results.ReadTimeDiff = ((results.ReadTimeMs_1 .- results.ReadTimeMs) ./ results.ReadTimeMs) .* 100
+    # Calculate speed ratios
+    results.WriteSpeedRatio = results.WriteTimeMs_1 ./ results.WriteTimeMs
+    results.ReadSpeedRatio = results.ReadTimeMs_1 ./ results.ReadTimeMs
     
     return results
 end
@@ -40,17 +40,26 @@ function generate_markdown_report(results)
         println(io, "")
         
         # Calculate overall averages
-        avg_write_diff = mean(results.WriteTimeDiff)
-        avg_read_diff = mean(results.ReadTimeDiff)
+        avg_write_ratio = mean(results.WriteSpeedRatio)
+        avg_read_ratio = mean(results.ReadSpeedRatio)
         
-        println(io, "- **Average Write Performance**: Julia is $(abs(round(avg_write_diff, digits=1)))% $(avg_write_diff > 0 ? "slower" : "faster") than C++")
-        println(io, "- **Average Read Performance**: Julia is $(abs(round(avg_read_diff, digits=1)))% $(avg_read_diff > 0 ? "slower" : "faster") than C++")
+        if avg_write_ratio > 1
+            println(io, "- **Average Write Performance**: C++ is $(round(avg_write_ratio, digits=1))x faster than Julia")
+        else
+            println(io, "- **Average Write Performance**: Julia is $(round(1/avg_write_ratio, digits=1))x faster than C++")
+        end
+        
+        if avg_read_ratio > 1
+            println(io, "- **Average Read Performance**: C++ is $(round(avg_read_ratio, digits=1))x faster than Julia")
+        else
+            println(io, "- **Average Read Performance**: Julia is $(round(1/avg_read_ratio, digits=1))x faster than C++")
+        end
         println(io, "")
         
         println(io, "## Detailed Results")
         println(io, "")
-        println(io, "| Test | Data Size | C++ Write (ms) | Julia Write (ms) | Diff % | C++ Read (ms) | Julia Read (ms) | Diff % |")
-        println(io, "|------|-----------|----------------|------------------|--------|---------------|-----------------|--------|")
+        println(io, "| Test | Data Size | C++ Write (ms) | Julia Write (ms) | Write Speed | C++ Read (ms) | Julia Read (ms) | Read Speed |")
+        println(io, "|------|-----------|----------------|------------------|-------------|---------------|-----------------|------------|")
         
         for row in eachrow(results)
             size_kb = row.DataSizeBytes / 1024
@@ -58,16 +67,24 @@ function generate_markdown_report(results)
                        size_kb < 1024 ? "$(round(size_kb, digits=1)) KB" : 
                        "$(round(size_kb/1024, digits=1)) MB"
             
-            write_diff_str = @sprintf("%+.1f%%", row.WriteTimeDiff)
-            read_diff_str = @sprintf("%+.1f%%", row.ReadTimeDiff)
+            # Format speed comparisons
+            if row.WriteSpeedRatio > 1.1
+                write_speed_str = "C++ $(round(row.WriteSpeedRatio, digits=1))x faster 🔴"
+            elseif row.WriteSpeedRatio < 0.91
+                write_speed_str = "Julia $(round(1/row.WriteSpeedRatio, digits=1))x faster 🟢"
+            else
+                write_speed_str = "Similar 🟡"
+            end
             
-            # Color code based on performance
-            write_indicator = row.WriteTimeDiff > 10 ? "🔴" : 
-                             row.WriteTimeDiff < -10 ? "🟢" : "🟡"
-            read_indicator = row.ReadTimeDiff > 10 ? "🔴" : 
-                            row.ReadTimeDiff < -10 ? "🟢" : "🟡"
+            if row.ReadSpeedRatio > 1.1
+                read_speed_str = "C++ $(round(row.ReadSpeedRatio, digits=1))x faster 🔴"
+            elseif row.ReadSpeedRatio < 0.91
+                read_speed_str = "Julia $(round(1/row.ReadSpeedRatio, digits=1))x faster 🟢"
+            else
+                read_speed_str = "Similar 🟡"
+            end
             
-            println(io, "| $(row.Name) | $(size_str) | $(round(row.WriteTimeMs, digits=3)) | $(round(row.WriteTimeMs_1, digits=3)) | $(write_diff_str) $(write_indicator) | $(round(row.ReadTimeMs, digits=3)) | $(round(row.ReadTimeMs_1, digits=3)) | $(read_diff_str) $(read_indicator) |")
+            println(io, "| $(row.Name) | $(size_str) | $(round(row.WriteTimeMs, digits=3)) | $(round(row.WriteTimeMs_1, digits=3)) | $(write_speed_str) | $(round(row.ReadTimeMs, digits=3)) | $(round(row.ReadTimeMs_1, digits=3)) | $(read_speed_str) |")
         end
         
         println(io, "")
@@ -75,26 +92,41 @@ function generate_markdown_report(results)
         println(io, "")
         
         # Find best and worst cases
-        best_write = results[argmin(results.WriteTimeDiff), :]
-        worst_write = results[argmax(results.WriteTimeDiff), :]
-        best_read = results[argmin(results.ReadTimeDiff), :]
-        worst_read = results[argmax(results.ReadTimeDiff), :]
+        best_write = results[argmin(results.WriteSpeedRatio), :]
+        worst_write = results[argmax(results.WriteSpeedRatio), :]
+        best_read = results[argmin(results.ReadSpeedRatio), :]
+        worst_read = results[argmax(results.ReadSpeedRatio), :]
         
         println(io, "### Write Performance")
-        println(io, "- **Best Case**: $(best_write.Name) - Julia is $(abs(round(best_write.WriteTimeDiff, digits=1)))% $(best_write.WriteTimeDiff > 0 ? "slower" : "faster")")
-        println(io, "- **Worst Case**: $(worst_write.Name) - Julia is $(abs(round(worst_write.WriteTimeDiff, digits=1)))% $(worst_write.WriteTimeDiff > 0 ? "slower" : "faster")")
+        if best_write.WriteSpeedRatio > 1
+            println(io, "- **Best Case**: $(best_write.Name) - C++ is $(round(best_write.WriteSpeedRatio, digits=1))x faster")
+        else
+            println(io, "- **Best Case**: $(best_write.Name) - Julia is $(round(1/best_write.WriteSpeedRatio, digits=1))x faster")
+        end
+        if worst_write.WriteSpeedRatio > 1
+            println(io, "- **Worst Case**: $(worst_write.Name) - C++ is $(round(worst_write.WriteSpeedRatio, digits=1))x faster")
+        else
+            println(io, "- **Worst Case**: $(worst_write.Name) - Julia is $(round(1/worst_write.WriteSpeedRatio, digits=1))x faster")
+        end
         println(io, "")
         
         println(io, "### Read Performance")
-        println(io, "- **Best Case**: $(best_read.Name) - Julia is $(abs(round(best_read.ReadTimeDiff, digits=1)))% $(best_read.ReadTimeDiff > 0 ? "slower" : "faster")")
-        println(io, "- **Worst Case**: $(worst_read.Name) - Julia is $(abs(round(worst_read.ReadTimeDiff, digits=1)))% $(worst_read.ReadTimeDiff > 0 ? "slower" : "faster")")
+        if best_read.ReadSpeedRatio > 1
+            println(io, "- **Best Case**: $(best_read.Name) - C++ is $(round(best_read.ReadSpeedRatio, digits=1))x faster")
+        else
+            println(io, "- **Best Case**: $(best_read.Name) - Julia is $(round(1/best_read.ReadSpeedRatio, digits=1))x faster")
+        end
+        if worst_read.ReadSpeedRatio > 1
+            println(io, "- **Worst Case**: $(worst_read.Name) - C++ is $(round(worst_read.ReadSpeedRatio, digits=1))x faster")
+        else
+            println(io, "- **Worst Case**: $(worst_read.Name) - Julia is $(round(1/worst_read.ReadSpeedRatio, digits=1))x faster")
+        end
         println(io, "")
         
         println(io, "## Notes")
         println(io, "")
-        println(io, "- **Positive percentages**: Julia is slower than C++")
-        println(io, "- **Negative percentages**: Julia is faster than C++")
-        println(io, "- **Legend**: 🟢 Julia >10% faster | 🟡 Within ±10% | 🔴 Julia >10% slower")
+        println(io, "- **Speed comparisons**: Shows which implementation is faster and by how many times")
+        println(io, "- **Legend**: 🟢 Julia faster | 🟡 Within 1.1x | 🔴 C++ faster")
         println(io, "- Tests were run with $(results.Iterations[1]) iterations for small data, decreasing for larger datasets")
         println(io, "- All times are averages across the specified number of iterations")
         println(io, "")
