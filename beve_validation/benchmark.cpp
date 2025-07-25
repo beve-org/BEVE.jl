@@ -7,7 +7,7 @@
 #include <chrono>
 #include <numeric>
 #include <iomanip>
-#include <map>
+#include <unordered_map>
 
 struct BenchmarkResult {
    std::string name;
@@ -32,7 +32,7 @@ struct glz::meta<SmallData> {
 
 struct MediumData {
    std::vector<double> values;
-   std::map<std::string, int32_t> lookup;
+   std::unordered_map<std::string, int32_t> lookup;
    std::vector<std::string> tags;
    
    MediumData() {
