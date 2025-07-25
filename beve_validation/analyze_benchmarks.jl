@@ -69,19 +69,19 @@ function generate_markdown_report(results)
             
             # Format speed comparisons
             if row.WriteSpeedRatio > 1.1
-                write_speed_str = "C++ $(round(row.WriteSpeedRatio, digits=1))x faster 🔴"
+                write_speed_str = "C++ $(round(row.WriteSpeedRatio, digits=1))x faster"
             elseif row.WriteSpeedRatio < 0.91
-                write_speed_str = "Julia $(round(1/row.WriteSpeedRatio, digits=1))x faster 🟢"
+                write_speed_str = "Julia $(round(1/row.WriteSpeedRatio, digits=1))x faster"
             else
-                write_speed_str = "Similar 🟡"
+                write_speed_str = "Similar"
             end
             
             if row.ReadSpeedRatio > 1.1
-                read_speed_str = "C++ $(round(row.ReadSpeedRatio, digits=1))x faster 🔴"
+                read_speed_str = "C++ $(round(row.ReadSpeedRatio, digits=1))x faster"
             elseif row.ReadSpeedRatio < 0.91
-                read_speed_str = "Julia $(round(1/row.ReadSpeedRatio, digits=1))x faster 🟢"
+                read_speed_str = "Julia $(round(1/row.ReadSpeedRatio, digits=1))x faster"
             else
-                read_speed_str = "Similar 🟡"
+                read_speed_str = "Similar"
             end
             
             println(io, "| $(row.Name) | $(size_str) | $(round(row.WriteTimeMs, digits=3)) | $(round(row.WriteTimeMs_1, digits=3)) | $(write_speed_str) | $(round(row.ReadTimeMs, digits=3)) | $(round(row.ReadTimeMs_1, digits=3)) | $(read_speed_str) |")
@@ -126,7 +126,6 @@ function generate_markdown_report(results)
         println(io, "## Notes")
         println(io, "")
         println(io, "- **Speed comparisons**: Shows which implementation is faster and by how many times")
-        println(io, "- **Legend**: 🟢 Julia faster | 🟡 Within 1.1x | 🔴 C++ faster")
         println(io, "- Tests were run with $(results.Iterations[1]) iterations for small data, decreasing for larger datasets")
         println(io, "- All times are averages across the specified number of iterations")
         println(io, "")
