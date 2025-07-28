@@ -1,6 +1,6 @@
 # Ensure required packages are available
 using Pkg
-pkgs = ["CSV", "DataFrames"]
+pkgs = ["CSV", "DataFrames", "Plots", "StatsPlots"]
 for pkg in pkgs
     if !haskey(Pkg.project().dependencies, pkg)
         println("Installing $pkg...")
@@ -13,6 +13,9 @@ using DataFrames
 using Printf
 using Statistics
 using Dates
+using Plots
+using StatsPlots
+gr()
 
 function read_benchmark_results()
     cpp_results = CSV.read("cpp_benchmark_results.csv", DataFrame)
@@ -168,19 +171,142 @@ function generate_markdown_report(results)
     end
 end
 
+function generate_plots(results)
+    # Create speedup plots
+    println("Generating performance comparison plots...")
+    
+    # Prepare data
+    test_names = results.Name
+    write_speedup = results.WriteSpeedRatio
+    read_speedup = results.ReadSpeedRatio
+    
+    # Convert speedup ratios to absolute values
+    # All values will be positive, showing the speedup factor
+    write_comparison = Float64[]
+    read_comparison = Float64[]
+    write_labels = String[]
+    read_labels = String[]
+    
+    for i in 1:length(write_speedup)
+        if write_speedup[i] > 1
+            push!(write_comparison, write_speedup[i])
+            push!(write_labels, "C++")
+        else
+            push!(write_comparison, 1/write_speedup[i])
+            push!(write_labels, "Julia")
+        end
+        
+        if read_speedup[i] > 1
+            push!(read_comparison, read_speedup[i])
+            push!(read_labels, "C++")
+        else
+            push!(read_comparison, 1/read_speedup[i])
+            push!(read_labels, "Julia")
+        end
+    end
+    
+    # Plot 1: Write Performance Comparison
+    p1 = bar(test_names, write_comparison, 
+        title="Write Performance: C++ vs Julia\n\n",
+        ylabel="Speedup Factor",
+        xlabel="Test Case",
+        legend=false,
+        rotation=45,
+        color=ifelse.(write_labels .== "C++", :blue, :green),
+        ylims=(0, maximum(write_comparison)+2),
+        grid=true,
+        size=(1000, 600),
+        bottom_margin=20Plots.mm,
+        left_margin=15Plots.mm,
+        right_margin=15Plots.mm,
+        top_margin=10Plots.mm,
+        titlefontsize=14
+    )
+    
+    # Plot 2: Read Performance Comparison
+    p2 = bar(test_names, read_comparison,
+        title="Read Performance: C++ vs Julia\n\n",
+        ylabel="Speedup Factor",
+        xlabel="Test Case",
+        legend=false,
+        rotation=45,
+        color=ifelse.(read_labels .== "C++", :blue, :green),
+        ylims=(0, maximum(read_comparison)+2),
+        grid=true,
+        size=(1000, 600),
+        bottom_margin=20Plots.mm,
+        left_margin=15Plots.mm,
+        right_margin=15Plots.mm,
+        top_margin=10Plots.mm,
+        titlefontsize=14
+    )
+    
+    # Plot 3: Combined Performance Comparison
+    p3 = groupedbar(test_names,
+        [write_comparison read_comparison],
+        label=["Write" "Read"],
+        title="Combined Performance Comparison: C++ vs Julia\n\n",
+        ylabel="Speedup Factor",
+        xlabel="Test Case",
+        rotation=45,
+        color=[:orange :purple],
+        ylims=(0, maximum([write_comparison; read_comparison])+2),
+        grid=true,
+        size=(1200, 600),
+        bottom_margin=20Plots.mm,
+        left_margin=15Plots.mm,
+        right_margin=15Plots.mm,
+        top_margin=10Plots.mm,
+        titlefontsize=14
+    )
+    
+    # Plot 4: Performance by Data Size
+    p4 = scatter(results.DataSizeBytes ./ 1024,  # Convert to KB
+        write_comparison,
+        label="Write",
+        xlabel="Data Size (KB)",
+        ylabel="Speedup Factor",
+        title="Performance vs Data Size\n\n",
+        xscale=:log10,
+        markersize=8,
+        markershape=:circle,
+        color=:orange,
+        ylims=(0, maximum([write_comparison; read_comparison])+2),
+        size=(1000, 600),
+        bottom_margin=20Plots.mm,
+        left_margin=15Plots.mm,
+        right_margin=15Plots.mm,
+        top_margin=10Plots.mm,
+        titlefontsize=14
+    )
+    scatter!(p4, results.DataSizeBytes ./ 1024,
+        read_comparison,
+        label="Read",
+        markersize=8,
+        markershape=:square,
+        color=:purple
+    )
+    
+    # Save plots
+    savefig(p1, "benchmark_write_performance.png")
+    savefig(p2, "benchmark_read_performance.png")
+    savefig(p3, "benchmark_combined_performance.png")
+    savefig(p4, "benchmark_performance_vs_size.png")
+    
+    println("Plots saved:")
+    println("  - benchmark_write_performance.png")
+    println("  - benchmark_read_performance.png")
+    println("  - benchmark_combined_performance.png")
+    println("  - benchmark_performance_vs_size.png")
+end
+
 # Main execution
 if !isfile("cpp_benchmark_results.csv") || !isfile("julia_benchmark_results.csv")
     println("Error: Benchmark result files not found. Please run both benchmarks first.")
     exit(1)
 end
 
-using Pkg
-Pkg.add(["CSV", "DataFrames"])
-using CSV
-using DataFrames
-using Statistics
-using Dates
-
 results = read_benchmark_results()
 generate_markdown_report(results)
-println("Benchmark analysis complete. Results written to benchmark_results.md")
+generate_plots(results)
+println("Benchmark analysis complete. Results written to benchmark_results.md and plots generated.")

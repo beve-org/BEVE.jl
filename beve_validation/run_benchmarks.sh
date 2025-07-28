@@ -35,4 +35,10 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo -e "\nBenchmark complete! See benchmark_results.md for the comparison report."
+echo -e "\nBenchmark complete!"
+echo "Results generated:"
+echo "  - benchmark_results.md - Detailed comparison report"
+echo "  - benchmark_write_performance.png - Write speedup comparison"
+echo "  - benchmark_read_performance.png - Read speedup comparison"  
+echo "  - benchmark_combined_performance.png - Combined performance view"
+echo "  - benchmark_performance_vs_size.png - Performance vs data size"
