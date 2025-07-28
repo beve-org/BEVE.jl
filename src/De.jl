@@ -3,11 +3,60 @@
 mutable struct BeveDeserializer
     io::IO
     peek_byte::Union{Nothing, UInt8}
+    read_buffer::Vector{UInt8}  # Pre-allocated buffer for reading
+    temp_buffer::Vector{UInt8}  # Temporary working buffer
     
     function BeveDeserializer(io::IO)
-        new(io, nothing)
+        new(io, nothing, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64))
     end
 end
+
+# Function lookup table for fast header dispatch
+const HEADER_PARSERS = Dict{UInt8, Function}(
+    NULL => (deser) -> nothing,
+    FALSE => (deser) -> false,
+    TRUE => (deser) -> true,
+    I8 => (deser) -> ltoh(read(deser.io, Int8)),
+    I16 => (deser) -> ltoh(read(deser.io, Int16)),
+    I32 => (deser) -> ltoh(read(deser.io, Int32)),
+    I64 => (deser) -> ltoh(read(deser.io, Int64)),
+    I128 => (deser) -> ltoh(read(deser.io, Int128)),
+    U8 => (deser) -> read(deser.io, UInt8),
+    U16 => (deser) -> ltoh(read(deser.io, UInt16)),
+    U32 => (deser) -> ltoh(read(deser.io, UInt32)),
+    U64 => (deser) -> ltoh(read(deser.io, UInt64)),
+    U128 => (deser) -> ltoh(read(deser.io, UInt128)),
+    F32 => (deser) -> ltoh(read(deser.io, Float32)),
+    F64 => (deser) -> ltoh(read(deser.io, Float64)),
+    STRING => (deser) -> read_string_data(deser),
+    STRING_OBJECT => (deser) -> parse_string_object(deser),
+    I8_OBJECT => (deser) -> parse_integer_object(deser, Int8),
+    I16_OBJECT => (deser) -> parse_integer_object(deser, Int16),
+    I32_OBJECT => (deser) -> parse_integer_object(deser, Int32),
+    I64_OBJECT => (deser) -> parse_integer_object(deser, Int64),
+    I128_OBJECT => (deser) -> parse_integer_object(deser, Int128),
+    U8_OBJECT => (deser) -> parse_integer_object(deser, UInt8),
+    U16_OBJECT => (deser) -> parse_integer_object(deser, UInt16),
+    U32_OBJECT => (deser) -> parse_integer_object(deser, UInt32),
+    U64_OBJECT => (deser) -> parse_integer_object(deser, UInt64),
+    U128_OBJECT => (deser) -> parse_integer_object(deser, UInt128),
+    BOOL_ARRAY => (deser) -> parse_bool_array(deser),
+    STRING_ARRAY => (deser) -> parse_string_array(deser),
+    F32_ARRAY => (deser) -> parse_f32_array(deser),
+    F64_ARRAY => (deser) -> parse_f64_array(deser),
+    I8_ARRAY => (deser) -> parse_i8_array(deser),
+    I16_ARRAY => (deser) -> parse_i16_array(deser),
+    I32_ARRAY => (deser) -> parse_i32_array(deser),
+    I64_ARRAY => (deser) -> parse_i64_array(deser),
+    U8_ARRAY => (deser) -> parse_u8_array(deser),
+    U16_ARRAY => (deser) -> parse_u16_array(deser),
+    U32_ARRAY => (deser) -> parse_u32_array(deser),
+    U64_ARRAY => (deser) -> parse_u64_array(deser),
+    GENERIC_ARRAY => (deser) -> parse_generic_array(deser),
+    COMPLEX => (deser) -> parse_complex(deser),
+    TAG => (deser) -> parse_type_tag(deser),
+    MATRIX => (deser) -> parse_matrix(deser)
+)
 
 struct BeveError <: Exception
     msg::String
@@ -40,48 +89,68 @@ function peek_byte!(deser::BeveDeserializer)::UInt8
     return deser.peek_byte
 end
 
-function read_size(deser::BeveDeserializer)::Int
+# Optimized size reading function
+@inline function read_size(deser::BeveDeserializer)::Int
     first = read_byte!(deser)
-    n_bytes = 2^(first & 0b11)
+    n_bytes = 1 << (first & 0b11)  # Faster than 2^(first & 0b11)
     
     if n_bytes == 1
         return Int(first >> 2)
     end
     
-    # Read the remaining bytes
-    remaining = n_bytes - 1
-    bytes = zeros(UInt8, 8)  # Maximum size for UInt64
-    bytes[1] = first
-    
-    if remaining > 7
-        throw(BeveError("Size too large"))
+    if n_bytes == 2
+        second = read_byte!(deser)
+        val = UInt16(first) | (UInt16(second) << 8)
+        return Int(ltoh(val) >> 2)
+    elseif n_bytes == 4
+        # Read 3 more bytes
+        val = UInt32(first)
+        val |= UInt32(read_byte!(deser)) << 8
+        val |= UInt32(read_byte!(deser)) << 16
+        val |= UInt32(read_byte!(deser)) << 24
+        return Int(ltoh(val) >> 2)
+    else  # n_bytes == 8
+        # Read 7 more bytes
+        val = UInt64(first)
+        for i in 1:7
+            val |= UInt64(read_byte!(deser)) << (8 * i)
+        end
+        return Int(ltoh(val) >> 2)
     end
-    
-    read!(deser.io, @view bytes[2:remaining+1])
-    
-    if sizeof(Int) == 8
-        size_val = ltoh(reinterpret(UInt64, bytes)[1]) >> 2
-    else
-        size_val = ltoh(reinterpret(UInt32, bytes[1:4])[1]) >> 2
-    end
-    
-    return Int(size_val)
 end
 
 function read_string_data(deser::BeveDeserializer)::String
     size = read_size(deser)
-    bytes = Vector{UInt8}(undef, size)
-    read!(deser.io, bytes)
-    return String(bytes)
+    if size == 0
+        return ""
+    end
+    
+    # Use pre-allocated buffer if string is small enough
+    if size <= length(deser.temp_buffer)
+        bytes = @view deser.temp_buffer[1:size]
+        read!(deser.io, bytes)
+        return String(copy(bytes))  # Copy needed since we're reusing buffer
+    else
+        # Allocate new buffer for large strings
+        bytes = Vector{UInt8}(undef, size)
+        read!(deser.io, bytes)
+        return String(bytes)
+    end
 end
 
 # Helper function for bulk array reads with endianness conversion
 @inline function read_array_data!(io::IO, result::Vector{T}) where T <: Union{Int8, UInt8}
     # Int8 and UInt8 don't need endianness conversion
-    read!(io, result)
+    if length(result) > 0
+        read!(io, result)
+    end
 end
 
 @inline function read_array_data!(io::IO, result::Vector{T}) where T <: Union{Int16, Int32, Int64, UInt16, UInt32, UInt64, Float32, Float64}
+    if length(result) == 0
+        return
+    end
+    
     if ENDIAN_BOM == 0x04030201  # Little endian system
         # Direct read without conversion
         read!(io, result)
@@ -94,95 +163,37 @@ end
     end
 end
 
+# Optimized version with deserializer buffer management
+@inline function read_array_data!(deser::BeveDeserializer, result::Vector{T}) where T <: Union{Int8, UInt8}
+    if length(result) > 0
+        read!(deser.io, result)
+    end
+end
+
+@inline function read_array_data!(deser::BeveDeserializer, result::Vector{T}) where T <: Union{Int16, Int32, Int64, UInt16, UInt32, UInt64, Float32, Float64}
+    if length(result) == 0
+        return
+    end
+    
+    if ENDIAN_BOM == 0x04030201  # Little endian system
+        # Direct read without conversion
+        read!(deser.io, result)
+    else
+        # Big endian system - read then convert
+        read!(deser.io, result)
+        @inbounds for i in 1:length(result)
+            result[i] = ltoh(result[i])
+        end
+    end
+end
+
+# Optimized parse_value using lookup table
 function parse_value(deser::BeveDeserializer)
     header = read_byte!(deser)
     
-    if header == NULL
-        return nothing
-    elseif header == FALSE
-        return false
-    elseif header == TRUE
-        return true
-    elseif header == I8
-        return ltoh(read(deser.io, Int8))
-    elseif header == I16
-        return ltoh(read(deser.io, Int16))
-    elseif header == I32
-        return ltoh(read(deser.io, Int32))
-    elseif header == I64
-        return ltoh(read(deser.io, Int64))
-    elseif header == I128
-        return ltoh(read(deser.io, Int128))
-    elseif header == U8
-        return read(deser.io, UInt8)
-    elseif header == U16
-        return ltoh(read(deser.io, UInt16))
-    elseif header == U32
-        return ltoh(read(deser.io, UInt32))
-    elseif header == U64
-        return ltoh(read(deser.io, UInt64))
-    elseif header == U128
-        return ltoh(read(deser.io, UInt128))
-    elseif header == F32
-        return ltoh(read(deser.io, Float32))
-    elseif header == F64
-        return ltoh(read(deser.io, Float64))
-    elseif header == STRING
-        return read_string_data(deser)
-    elseif header == STRING_OBJECT
-        return parse_string_object(deser)
-    elseif header == I8_OBJECT
-        return parse_integer_object(deser, Int8)
-    elseif header == I16_OBJECT
-        return parse_integer_object(deser, Int16)
-    elseif header == I32_OBJECT
-        return parse_integer_object(deser, Int32)
-    elseif header == I64_OBJECT
-        return parse_integer_object(deser, Int64)
-    elseif header == I128_OBJECT
-        return parse_integer_object(deser, Int128)
-    elseif header == U8_OBJECT
-        return parse_integer_object(deser, UInt8)
-    elseif header == U16_OBJECT
-        return parse_integer_object(deser, UInt16)
-    elseif header == U32_OBJECT
-        return parse_integer_object(deser, UInt32)
-    elseif header == U64_OBJECT
-        return parse_integer_object(deser, UInt64)
-    elseif header == U128_OBJECT
-        return parse_integer_object(deser, UInt128)
-    elseif header == BOOL_ARRAY
-        return parse_bool_array(deser)
-    elseif header == STRING_ARRAY
-        return parse_string_array(deser)
-    elseif header == F32_ARRAY
-        return parse_f32_array(deser)
-    elseif header == F64_ARRAY
-        return parse_f64_array(deser)
-    elseif header == I8_ARRAY
-        return parse_i8_array(deser)
-    elseif header == I16_ARRAY
-        return parse_i16_array(deser)
-    elseif header == I32_ARRAY
-        return parse_i32_array(deser)
-    elseif header == I64_ARRAY
-        return parse_i64_array(deser)
-    elseif header == U8_ARRAY
-        return parse_u8_array(deser)
-    elseif header == U16_ARRAY
-        return parse_u16_array(deser)
-    elseif header == U32_ARRAY
-        return parse_u32_array(deser)
-    elseif header == U64_ARRAY
-        return parse_u64_array(deser)
-    elseif header == GENERIC_ARRAY
-        return parse_generic_array(deser)
-    elseif header == COMPLEX
-        return parse_complex(deser)
-    elseif header == TAG
-        return parse_type_tag(deser)
-    elseif header == MATRIX
-        return parse_matrix(deser)
+    parser = get(HEADER_PARSERS, header, nothing)
+    if parser !== nothing
+        return parser(deser)
     else
         throw(BeveError("Unsupported header: $(header_name(header)) (0x$(string(header, base=16)))"))
     end
@@ -222,15 +233,27 @@ function parse_complex(deser::BeveDeserializer)
             result = Vector{ComplexF32}(undef, size)
             if ENDIAN_BOM == 0x04030201  # Little endian system
                 # Direct read of complex array as interleaved real/imag values
-                unsafe_read(deser.io, pointer(result), size * sizeof(ComplexF32))
+                if size > 0
+                    unsafe_read(deser.io, pointer(result), size * sizeof(ComplexF32))
+                end
             else
-                # Big endian - need conversion
-                buffer = Vector{Float32}(undef, 2 * size)
-                read!(deser.io, buffer)
-                @inbounds for i in 1:size
-                    real_val = ltoh(buffer[2i-1])
-                    imag_val = ltoh(buffer[2i])
-                    result[i] = ComplexF32(real_val, imag_val)
+                # Big endian - need conversion using working buffer
+                if size > 0
+                    buffer_size = 2 * size * sizeof(Float32)
+                    if buffer_size > length(deser.read_buffer)
+                        resize!(deser.read_buffer, buffer_size)
+                    end
+                    
+                    # Read interleaved float data
+                    buffer_ptr = reinterpret(Ptr{Float32}, pointer(deser.read_buffer))
+                    unsafe_read(deser.io, buffer_ptr, buffer_size)
+                    
+                    # Convert with endianness correction
+                    @inbounds for i in 1:size
+                        real_val = ltoh(unsafe_load(buffer_ptr, 2i-1))
+                        imag_val = ltoh(unsafe_load(buffer_ptr, 2i))
+                        result[i] = ComplexF32(real_val, imag_val)
+                    end
                 end
             end
             return result
@@ -238,15 +261,27 @@ function parse_complex(deser::BeveDeserializer)
             result = Vector{ComplexF64}(undef, size)
             if ENDIAN_BOM == 0x04030201  # Little endian system
                 # Direct read of complex array as interleaved real/imag values
-                unsafe_read(deser.io, pointer(result), size * sizeof(ComplexF64))
+                if size > 0
+                    unsafe_read(deser.io, pointer(result), size * sizeof(ComplexF64))
+                end
             else
-                # Big endian - need conversion
-                buffer = Vector{Float64}(undef, 2 * size)
-                read!(deser.io, buffer)
-                @inbounds for i in 1:size
-                    real_val = ltoh(buffer[2i-1])
-                    imag_val = ltoh(buffer[2i])
-                    result[i] = ComplexF64(real_val, imag_val)
+                # Big endian - need conversion using working buffer
+                if size > 0
+                    buffer_size = 2 * size * sizeof(Float64)
+                    if buffer_size > length(deser.read_buffer)
+                        resize!(deser.read_buffer, buffer_size)
+                    end
+                    
+                    # Read interleaved double data
+                    buffer_ptr = reinterpret(Ptr{Float64}, pointer(deser.read_buffer))
+                    unsafe_read(deser.io, buffer_ptr, buffer_size)
+                    
+                    # Convert with endianness correction
+                    @inbounds for i in 1:size
+                        real_val = ltoh(unsafe_load(buffer_ptr, 2i-1))
+                        imag_val = ltoh(unsafe_load(buffer_ptr, 2i))
+                        result[i] = ComplexF64(real_val, imag_val)
+                    end
                 end
             end
             return result
@@ -424,70 +459,70 @@ end
 function parse_f32_array(deser::BeveDeserializer)::Vector{Float32}
     size = read_size(deser)
     result = Vector{Float32}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_f64_array(deser::BeveDeserializer)::Vector{Float64}
     size = read_size(deser)
     result = Vector{Float64}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_i8_array(deser::BeveDeserializer)::Vector{Int8}
     size = read_size(deser)
     result = Vector{Int8}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_i16_array(deser::BeveDeserializer)::Vector{Int16}
     size = read_size(deser)
     result = Vector{Int16}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_i32_array(deser::BeveDeserializer)::Vector{Int32}
     size = read_size(deser)
     result = Vector{Int32}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_i64_array(deser::BeveDeserializer)::Vector{Int64}
     size = read_size(deser)
     result = Vector{Int64}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_u8_array(deser::BeveDeserializer)::Vector{UInt8}
     size = read_size(deser)
     result = Vector{UInt8}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_u16_array(deser::BeveDeserializer)::Vector{UInt16}
     size = read_size(deser)
     result = Vector{UInt16}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_u32_array(deser::BeveDeserializer)::Vector{UInt32}
     size = read_size(deser)
     result = Vector{UInt32}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
 function parse_u64_array(deser::BeveDeserializer)::Vector{UInt64}
     size = read_size(deser)
     result = Vector{UInt64}(undef, size)
-    read_array_data!(deser.io, result)
+    read_array_data!(deser, result)
     return result
 end
 
@@ -558,34 +593,35 @@ function deser_beve(::Type{T}, data::Vector{UInt8}) where T
     end
 end
 
+# Optimized struct reconstruction with pre-allocated arrays
 function reconstruct_struct(::Type{T}, data::Dict{String, Any}) where T
     field_names = fieldnames(T)
     field_types = fieldtypes(T)
-    field_values = []
+    num_fields = length(field_names)
+    field_values = Vector{Any}(undef, num_fields)
     
-    for (i, fname) in enumerate(field_names)
+    @inbounds for i in 1:num_fields
+        fname = field_names[i]
         fname_str = string(fname)
         if haskey(data, fname_str)
             field_val = data[fname_str]
             field_type = field_types[i]
             
-            # Convert if necessary
-            if !(field_val isa field_type)
-                if field_type <: AbstractString
-                    push!(field_values, string(field_val))
-                elseif field_type <: Number
-                    push!(field_values, field_type(field_val))
-                elseif field_type <: Dict && field_val isa Dict
-                    # Convert dict to specific dict type
-                    push!(field_values, convert(field_type, field_val))
-                elseif field_val isa Dict{String, Any} && !isempty(fieldnames(field_type))
-                    # Recursively reconstruct nested struct
-                    push!(field_values, reconstruct_struct(field_type, field_val))
-                else
-                    push!(field_values, field_val)
-                end
+            # Convert if necessary - optimized branches
+            if field_val isa field_type
+                field_values[i] = field_val
+            elseif field_type <: AbstractString
+                field_values[i] = string(field_val)
+            elseif field_type <: Number
+                field_values[i] = field_type(field_val)
+            elseif field_type <: Dict && field_val isa Dict
+                # Convert dict to specific dict type
+                field_values[i] = convert(field_type, field_val)
+            elseif field_val isa Dict{String, Any} && !isempty(fieldnames(field_type))
+                # Recursively reconstruct nested struct
+                field_values[i] = reconstruct_struct(field_type, field_val)
             else
-                push!(field_values, field_val)
+                field_values[i] = field_val
             end
         else
             throw(BeveError("Missing field: $fname_str for type $T"))
