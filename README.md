@@ -183,16 +183,30 @@ To run the test suite:
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
-## HTTP Support
+## Optional HTTP Support
 
-BEVE.jl includes optional HTTP server and client functionality that allows you to serve and consume BEVE data over HTTP 1.1. This feature supports JSON pointer syntax for accessing specific parts of registered objects.
+BEVE.jl includes optional HTTP server and client functionality through a package extension. HTTP.jl is now an optional dependency - you only need it if you want to use HTTP features.
 
-### HTTP Server
+### Enabling HTTP Features
 
-Register struct instances at HTTP paths and serve them via HTTP:
+HTTP functionality is provided through a Julia package extension (available since Julia 1.9). To use HTTP features, simply load HTTP.jl:
 
 ```julia
 using BEVE
+using HTTP  # This automatically loads the HTTP extension
+
+# Now HTTP functions are available
+```
+
+Without HTTP.jl, core BEVE serialization works normally, but HTTP functions will not be available.
+
+### HTTP Server
+
+Once HTTP.jl is loaded, you can register struct instances at HTTP paths and serve them:
+
+```julia
+using BEVE
+using HTTP  # Required for HTTP functionality
 
 # Define your structs
 struct Employee
@@ -235,6 +249,9 @@ The server supports JSON pointer syntax for accessing nested data:
 Make requests to BEVE HTTP servers:
 
 ```julia
+using BEVE
+using HTTP  # Required for HTTP functionality
+
 # Create client
 client = BeveHttpClient("http://localhost:8080")
 
@@ -262,13 +279,13 @@ JSON pointers follow RFC 6901 standard:
 
 ### API Reference
 
-#### Server Functions
+#### Server Functions (requires HTTP.jl)
 
 - `register_object(path::String, obj)` - Register an object at the given HTTP path
 - `unregister_object(path::String)` - Remove an object from the given path
 - `start_server(host::String, port::Int)` - Start HTTP server
 
-#### Client Functions
+#### Client Functions (requires HTTP.jl)
 
 - `BeveHttpClient(base_url::String; headers::Dict)` - Create HTTP client
 - `get(client::BeveHttpClient, path::String; json_pointer::String, as_type::Type)` - GET request
@@ -276,5 +293,5 @@ JSON pointers follow RFC 6901 standard:
 
 ## Compatibility
 
-- Julia 1.8+
-- HTTP.jl (for HTTP functionality)
+- Julia 1.9+ (required for package extensions)
+- HTTP.jl (optional, only needed for HTTP functionality)

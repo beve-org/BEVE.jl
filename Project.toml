@@ -3,8 +3,12 @@ uuid = "e4b2c2d1-1234-5678-9abc-123456789abc"
 authors = ["BEVE.jl Contributors"]
 version = "1.0.0"
 
-[deps]
+[weakdeps]
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 
+[extensions]
+HTTPExt = "HTTP"
+
 [compat]
-julia = "1.8"
+HTTP = "1"
+julia = "1.9"

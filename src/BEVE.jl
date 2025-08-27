@@ -44,12 +44,17 @@ export to_beve, to_beve!, BeveTypeTag, BeveMatrix, MatrixLayout, LayoutRight, La
 # Exports for deserialization  
 export from_beve, deser_beve
 
-# Exports for HTTP functionality
-export register_object, unregister_object, start_server, BeveHttpClient
-
 include("Headers.jl")
 include("Ser.jl")
 include("De.jl")
-include("Http.jl")
+
+# HTTP functionality stubs - these will be replaced by the extension when HTTP.jl is loaded
+function register_object end
+function unregister_object end
+function start_server end
+function BeveHttpClient end  # Function stub instead of struct
+
+# Export the HTTP functions (they'll only work when HTTP.jl is loaded)
+export register_object, unregister_object, start_server, BeveHttpClient
 
 end

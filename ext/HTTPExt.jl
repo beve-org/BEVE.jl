@@ -1,7 +1,37 @@
-# BEVE HTTP Module
-# Provides HTTP server and client functionality with BEVE serialization
+module HTTPExt
 
+using BEVE
 using HTTP
+
+# Import the functions we need from BEVE
+using BEVE: to_beve, from_beve, deser_beve
+
+# Import the stubs we'll extend
+import BEVE: register_object, unregister_object, start_server, BeveHttpClient
+
+# Define the actual BeveHttpClient struct
+struct BeveHttpClientImpl
+    base_url::String
+    headers::Dict{String, String}
+    
+    function BeveHttpClientImpl(base_url::String; headers::Dict{String, String} = Dict{String, String}())
+        # Ensure base_url doesn't end with /
+        normalized_url = endswith(base_url, "/") ? base_url[1:end-1] : base_url
+        
+        # Set default headers
+        default_headers = Dict(
+            "User-Agent" => "BEVE.jl HTTP Client",
+            "Accept" => "application/x-beve"
+        )
+        
+        merged_headers = merge(default_headers, headers)
+        
+        new(normalized_url, merged_headers)
+    end
+end
+
+# Constructor function that users will call
+BEVE.BeveHttpClient(base_url::String; headers::Dict{String, String} = Dict{String, String}()) = BeveHttpClientImpl(base_url; headers=headers)
 
 # Registry to store registered struct instances and their paths
 struct BeveHttpRegistry
@@ -16,7 +46,7 @@ end
 const GLOBAL_REGISTRY = BeveHttpRegistry()
 
 """
-    register_object(path::String, obj::T) where T
+    BEVE.register_object(path::String, obj::T) where T
 
 Register a struct instance under a specific HTTP path.
 
@@ -32,7 +62,7 @@ company = Company("ACME Corp", employees)
 register_object("/api/company", company)
 ```
 """
-function register_object(path::String, obj::T) where T
+function BEVE.register_object(path::String, obj::T) where T
     # Normalize path to ensure it starts with /
     normalized_path = startswith(path, "/") ? path : "/" * path
     
@@ -43,11 +73,11 @@ function register_object(path::String, obj::T) where T
 end
 
 """
-    unregister_object(path::String)
+    BEVE.unregister_object(path::String)
 
 Unregister an object from the given path.
 """
-function unregister_object(path::String)
+function BEVE.unregister_object(path::String)
     normalized_path = startswith(path, "/") ? path : "/" * path
     
     delete!(GLOBAL_REGISTRY.registered_objects, normalized_path)
@@ -345,7 +375,7 @@ function request_handler(req::HTTP.Request)::HTTP.Response
 end
 
 """
-    start_server(host::String = "127.0.0.1", port::Int = 8080)
+    BEVE.start_server(host::String = "127.0.0.1", port::Int = 8080)
 
 Start a BEVE HTTP server.
 
@@ -370,7 +400,7 @@ server = start_server("127.0.0.1", 8080)
 # GET /api/company/employees/0 -> first employee
 ```
 """
-function start_server(host::String = "127.0.0.1", port::Int = 8080)
+function BEVE.start_server(host::String = "127.0.0.1", port::Int = 8080)
     @info "Starting BEVE HTTP server on $host:$port"
     
     server = HTTP.serve(request_handler, host, port)
@@ -379,34 +409,10 @@ function start_server(host::String = "127.0.0.1", port::Int = 8080)
     return server
 end
 
-# BEVE HTTP Client
-"""
-    BeveHttpClient
-
-HTTP client for making requests to BEVE servers.
-"""
-struct BeveHttpClient
-    base_url::String
-    headers::Dict{String, String}
-    
-    function BeveHttpClient(base_url::String; headers::Dict{String, String} = Dict{String, String}())
-        # Ensure base_url doesn't end with /
-        normalized_url = endswith(base_url, "/") ? base_url[1:end-1] : base_url
-        
-        # Set default headers
-        default_headers = Dict(
-            "User-Agent" => "BEVE.jl HTTP Client",
-            "Accept" => "application/x-beve"
-        )
-        
-        merged_headers = merge(default_headers, headers)
-        
-        new(normalized_url, merged_headers)
-    end
-end
+# BEVE HTTP Client methods
 
 """
-    get(client::BeveHttpClient, path::String; json_pointer::String = "", as_type::Type = Any)
+    get(client::BeveHttpClientImpl, path::String; json_pointer::String = "", as_type::Type = Any)
 
 Make a GET request to retrieve BEVE data.
 
@@ -425,7 +431,7 @@ employees = get(client, "/api/company/employees")
 first_employee = get(client, "/api/company/employees/0")
 ```
 """
-function Base.get(client::BeveHttpClient, path::String; json_pointer::String = "", as_type::Type = Any)
+function Base.get(client::BeveHttpClientImpl, path::String; json_pointer::String = "", as_type::Type = Any)
     try
         # Build URL
         url = client.base_url * path
@@ -469,7 +475,7 @@ function Base.get(client::BeveHttpClient, path::String; json_pointer::String = "
             
             return parsed_data
         else
-            throw(HTTP.StatusError(response.status, response.body))
+            error("HTTP request failed with status $(response.status): $(String(response.body))")
         end
     catch e
         rethrow(e)
@@ -477,7 +483,7 @@ function Base.get(client::BeveHttpClient, path::String; json_pointer::String = "
 end
 
 """
-    post(client::BeveHttpClient, path::String, data; json_pointer::String = "")
+    post(client::BeveHttpClientImpl, path::String, data; json_pointer::String = "")
 
 Make a POST request to send BEVE data.
 
@@ -494,7 +500,7 @@ post(client, "/api/company", new_company)
 post(client, "/api/company", "Updated Corp", json_pointer="/name")
 ```
 """
-function post(client::BeveHttpClient, path::String, data; json_pointer::String = "")
+function post(client::BeveHttpClientImpl, path::String, data; json_pointer::String = "")
     try
         # Build URL
         url = client.base_url * path
@@ -516,12 +522,11 @@ function post(client::BeveHttpClient, path::String, data; json_pointer::String =
         if response.status in [200, 201]
             return String(response.body)
         else
-            throw(HTTP.StatusError(response.status, response.body))
+            error("HTTP request failed with status $(response.status): $(String(response.body))")
         end
     catch e
         rethrow(e)
     end
 end
 
-# Export public API
-export register_object, unregister_object, start_server, BeveHttpClient
+end # module HTTPExt

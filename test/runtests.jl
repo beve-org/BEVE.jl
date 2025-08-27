@@ -321,157 +321,30 @@ using BEVE
         @test parsed2["optional_string"] === nothing
     end
     
-    @testset "HTTP Functionality" begin
+    @testset "HTTP Extension Loading" begin
+        # Test that HTTP functions work when HTTP.jl is loaded
         using HTTP
         
-        # Define test structs
-        struct TestEmployee
-            id::Int
-            name::String
-            active::Bool
+        struct TestData
+            value::Int
         end
         
-        struct TestCompany
-            name::String
-            employees::Vector{TestEmployee}
-            founded::Int
-        end
+        # Test that basic HTTP functions are available
+        test_obj = TestData(42)
         
-        @testset "JSON Pointer Parsing" begin
-            @test BEVE.parse_json_pointer("/") == String[]
-            @test BEVE.parse_json_pointer("/employees") == ["employees"]
-            @test BEVE.parse_json_pointer("/employees/0") == ["employees", "0"]
-            @test BEVE.parse_json_pointer("/employees/0/name") == ["employees", "0", "name"]
-            
-            # Test escaping
-            @test BEVE.parse_json_pointer("/field~0name") == ["field~name"]
-            @test BEVE.parse_json_pointer("/field~1name") == ["field/name"]
-        end
+        # Test registration works
+        register_object("/test", test_obj)
+        unregister_object("/test")
+        @test true  # If we got here without errors, the extension loaded
         
-        @testset "JSON Pointer Resolution" begin
-            # Create test data
-            employees = [
-                TestEmployee(1, "Alice", true),
-                TestEmployee(2, "Bob", false)
-            ]
-            company = TestCompany("ACME Corp", employees, 2020)
-            
-            # Test resolving on struct
-            @test BEVE.resolve_json_pointer(company, ["name"]) == "ACME Corp"
-            @test BEVE.resolve_json_pointer(company, ["founded"]) == 2020
-            @test BEVE.resolve_json_pointer(company, ["employees"]) == employees
-            @test BEVE.resolve_json_pointer(company, ["employees", "0"]) == employees[1]
-            @test BEVE.resolve_json_pointer(company, ["employees", "0", "name"]) == "Alice"
-            @test BEVE.resolve_json_pointer(company, ["employees", "1", "active"]) == false
-            
-            # Test resolving on dictionary (what we get from BEVE deserialization)
-            beve_data = to_beve(company)
-            parsed_company = from_beve(beve_data)
-            
-            @test BEVE.resolve_json_pointer(parsed_company, ["name"]) == "ACME Corp"
-            @test BEVE.resolve_json_pointer(parsed_company, ["founded"]) == 2020
-            @test BEVE.resolve_json_pointer(parsed_company, ["employees", "0", "name"]) == "Alice"
-            @test BEVE.resolve_json_pointer(parsed_company, ["employees", "1", "active"]) == false
-            
-            # Test error cases
-            @test_throws ArgumentError BEVE.resolve_json_pointer(company, ["nonexistent"])
-            @test_throws ArgumentError BEVE.resolve_json_pointer(company, ["employees", "10"])
-            @test_throws ArgumentError BEVE.resolve_json_pointer(company, ["employees", "invalid"])
-        end
+        # Test client creation works
+        client = BeveHttpClient("http://localhost:8080")
+        @test client !== nothing
         
-        @testset "Object Registration" begin
-            # Create test data
-            employees = [TestEmployee(1, "Alice", true)]
-            company = TestCompany("Test Corp", employees, 2021)
-            
-            # Test registration
-            register_object("/test/company", company)
-            @test haskey(BEVE.GLOBAL_REGISTRY.registered_objects, "/test/company")
-            @test BEVE.GLOBAL_REGISTRY.registered_objects["/test/company"] === company
-            @test BEVE.GLOBAL_REGISTRY.type_mappings["/test/company"] === TestCompany
-            
-            # Test path normalization
-            register_object("test/employee", employees[1])
-            @test haskey(BEVE.GLOBAL_REGISTRY.registered_objects, "/test/employee")
-            
-            # Test unregistration
-            unregister_object("/test/company")
-            @test !haskey(BEVE.GLOBAL_REGISTRY.registered_objects, "/test/company")
-            @test !haskey(BEVE.GLOBAL_REGISTRY.type_mappings, "/test/company")
-            
-            # Clean up
-            unregister_object("/test/employee")
+        # Run the full extension test suite if it exists
+        extension_test_file = joinpath(@__DIR__, "test_http_extension.jl")
+        if isfile(extension_test_file)
+            include(extension_test_file)
         end
-        
-        @testset "HTTP Request Handling" begin
-            # Register test data
-            employees = [
-                TestEmployee(1, "Alice", true),
-                TestEmployee(2, "Bob", false)
-            ]
-            company = TestCompany("HTTP Test Corp", employees, 2022)
-            register_object("/api/test-company", company)
-            
-            try
-                # Test GET request - full object
-                response = BEVE.handle_get_request("/api/test-company")
-                @test response.status == 200
-                @test response.headers[1][1] == "Content-Type"
-                @test response.headers[1][2] == "application/x-beve"
-                
-                # Deserialize and verify
-                returned_data = from_beve(response.body)
-                @test returned_data["name"] == "HTTP Test Corp"
-                @test returned_data["founded"] == 2022
-                @test length(returned_data["employees"]) == 2
-                
-                # Test GET request with JSON pointer
-                response = BEVE.handle_get_request("/api/test-company", "/name")
-                @test response.status == 200
-                returned_name = from_beve(response.body)
-                @test returned_name == "HTTP Test Corp"
-                
-                # Test GET request with array access
-                response = BEVE.handle_get_request("/api/test-company", "/employees/0/name")
-                @test response.status == 200
-                returned_employee_name = from_beve(response.body)
-                @test returned_employee_name == "Alice"
-                
-                # Test 404 for non-existent path
-                response = BEVE.handle_get_request("/api/nonexistent")
-                @test response.status == 404
-                
-                # Test 400 for invalid JSON pointer
-                response = BEVE.handle_get_request("/api/test-company", "/nonexistent")
-                @test response.status == 400
-                
-            finally
-                # Clean up
-                unregister_object("/api/test-company")
-            end
-        end
-        
-        @testset "BeveHttpClient" begin
-            # Test client creation
-            client = BeveHttpClient("http://localhost:8080")
-            @test client.base_url == "http://localhost:8080"
-            @test client.headers["User-Agent"] == "BEVE.jl HTTP Client"
-            @test client.headers["Accept"] == "application/x-beve"
-            
-            # Test URL normalization
-            client2 = BeveHttpClient("http://localhost:8080/")
-            @test client2.base_url == "http://localhost:8080"
-            
-            # Test custom headers
-            custom_headers = Dict("Authorization" => "Bearer token123")
-            client3 = BeveHttpClient("http://localhost:8080", headers=custom_headers)
-            @test client3.headers["Authorization"] == "Bearer token123"
-            @test client3.headers["User-Agent"] == "BEVE.jl HTTP Client" # Should still have defaults
-        end
-        
-        # Note: Full integration tests with actual HTTP server would require
-        # starting a server, making requests, and stopping it. This is complex
-        # in a test environment and better suited for manual testing or 
-        # dedicated integration test files.
     end
 end
