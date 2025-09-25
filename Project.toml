@@ -1,6 +1,6 @@
 name = "BEVE"
 uuid = "e4b2c2d1-1234-5678-9abc-123456789abc"
-authors = ["BEVE.jl Contributors"]
+authors = ["Stephen Berry <stephenberry.developer@gmail.com>"]
 version = "1.1.0"
 
 [weakdeps]
