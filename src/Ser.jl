@@ -4,8 +4,43 @@
 (ser_name(::Type{T}, ::Val{x})::Symbol) where {T,x} = x
 (ser_value(::Type{T}, ::Val{x}, v::V)::V) where {T,x,V} = v
 (ser_type(::Type{T}, v::V)::V) where {T,V} = v
-(ser_ignore_field(::Type{T}, ::Val{x})::Bool) where {T,x} = false
-(ser_ignore_field(::Type{T}, k::Val{x}, v::V)::Bool) where {T,x,V} = ser_ignore_field(T, k)
+(skip(::Type{T})) where T = ()
+(skip(::Type{T}, ::Val{x})::Bool) where {T,x} = false
+(skip(::Type{T}, k::Val{x}, v::V)::Bool) where {T,x,V} = skip(T, k)
+
+macro skip(type_expr, fields...)
+    isempty(fields) && return :(skip(::Type{$(esc(type_expr))}) = ())
+
+    normalized_fields = Vector{Symbol}(undef, length(fields))
+    for (idx, field) in pairs(fields)
+        if field isa Symbol
+            normalized_fields[idx] = field
+        elseif field isa Expr && field.head == :quote && length(field.args) == 1 && field.args[1] isa Symbol
+            normalized_fields[idx] = field.args[1]
+        elseif field isa String
+            normalized_fields[idx] = Symbol(field)
+        else
+            error("@skip expects symbols or string literals, got: $(repr(field))")
+        end
+    end
+
+    tuple_expr = Expr(:tuple, map(QuoteNode, normalized_fields)...)
+    return :(skip(::Type{$(esc(type_expr))}) = $tuple_expr)
+end
+
+@inline function normalize_skip_fields(fields)
+    ignored = Symbol[]
+    for field in fields
+        if field isa Symbol
+            push!(ignored, field)
+        elseif field isa AbstractString
+            push!(ignored, Symbol(field))
+        else
+            throw(ArgumentError("Unsupported skip field identifier: $(repr(field))"))
+        end
+    end
+    return isempty(ignored) ? nothing : ignored
+end
 
 mutable struct BeveSerializer
     io::IO
@@ -677,18 +712,30 @@ function beve_value!(ser::BeveSerializer, val::T) where T
         # Serialize as a string-keyed object
         write(ser.io, STRING_OBJECT)
         fields = fieldnames(T)
-        write_size(ser, length(fields))
-        
+        declared_skipped = normalize_skip_fields(skip(T))
+        serialized_fields = Pair{String, Any}[]
+
         for field_name in fields
+            if declared_skipped !== nothing && field_name in declared_skipped
+                continue
+            end
             field_val = getfield(val, field_name)
             # Apply serialization transformations
             key = ser_name(T, Val(field_name))
             value = ser_type(T, ser_value(T, Val(field_name), field_val))
-            
-            if !ser_ignore_field(T, Val(field_name), value)
-                write_string_data(ser, string(key))
-                beve_value!(ser, value)
+
+            if skip(T, Val(field_name), value)
+                continue
             end
+
+            push!(serialized_fields, string(key) => value)
+        end
+
+        write_size(ser, length(serialized_fields))
+
+        for field_entry in serialized_fields
+            write_string_data(ser, field_entry.first)
+            beve_value!(ser, field_entry.second)
         end
     else
         error("Cannot serialize type $T to BEVE")

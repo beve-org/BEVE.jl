@@ -85,6 +85,58 @@ using BEVE
         @test reconstructed.name == person.name
         @test reconstructed.age == person.age
     end
+
+    @testset "Struct Field Skipping" begin
+        struct Credentials
+            username::String
+            password::String
+            token::Union{String, Nothing}
+        end
+
+        BEVE.@skip Credentials password
+
+        function BEVE.skip(::Type{Credentials}, ::Val{:token}, value)
+            return value === nothing
+        end
+
+        credentials = Credentials("alice", "secret", "abc123")
+        parsed_credentials = from_beve(to_beve(credentials))
+
+        @test parsed_credentials isa Dict{String, Any}
+        @test parsed_credentials["username"] == "alice"
+        @test !haskey(parsed_credentials, "password")
+        @test parsed_credentials["token"] == "abc123"
+
+        credentials_without_token = Credentials("bob", "hidden", nothing)
+        parsed_without_token = from_beve(to_beve(credentials_without_token))
+
+        @test parsed_without_token isa Dict{String, Any}
+        @test parsed_without_token["username"] == "bob"
+        @test !haskey(parsed_without_token, "password")
+        @test !haskey(parsed_without_token, "token")
+        @test length(parsed_without_token) == 1
+    end
+
+    @testset "Multiple Field Skipping" begin
+        struct Secrets
+            public_id::Int
+            api_key::String
+            private_notes::String
+            created_at::String
+        end
+
+        BEVE.@skip Secrets api_key private_notes
+
+        secrets = Secrets(101, "API-XYZ", "internal", "2024-01-01")
+        parsed_secrets = from_beve(to_beve(secrets))
+
+        @test parsed_secrets isa Dict{String, Any}
+        @test parsed_secrets["public_id"] == 101
+        @test parsed_secrets["created_at"] == "2024-01-01"
+        @test !haskey(parsed_secrets, "api_key")
+        @test !haskey(parsed_secrets, "private_notes")
+        @test length(parsed_secrets) == 2
+    end
     
     @testset "Complex Nested Structs" begin
         # Define nested struct types
