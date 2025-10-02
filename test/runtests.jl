@@ -93,9 +93,9 @@ using BEVE
             token::Union{String, Nothing}
         end
 
-        BEVE.skip(::Type{Credentials}) = (:password,)
+        BEVE.@skip Credentials password
 
-        function BEVE.ser_ignore_field(::Type{Credentials}, ::Val{:token}, value)
+        function BEVE.skip(::Type{Credentials}, ::Val{:token}, value)
             return value === nothing
         end
 
@@ -115,6 +115,27 @@ using BEVE
         @test !haskey(parsed_without_token, "password")
         @test !haskey(parsed_without_token, "token")
         @test length(parsed_without_token) == 1
+    end
+
+    @testset "Multiple Field Skipping" begin
+        struct Secrets
+            public_id::Int
+            api_key::String
+            private_notes::String
+            created_at::String
+        end
+
+        BEVE.@skip Secrets api_key private_notes
+
+        secrets = Secrets(101, "API-XYZ", "internal", "2024-01-01")
+        parsed_secrets = from_beve(to_beve(secrets))
+
+        @test parsed_secrets isa Dict{String, Any}
+        @test parsed_secrets["public_id"] == 101
+        @test parsed_secrets["created_at"] == "2024-01-01"
+        @test !haskey(parsed_secrets, "api_key")
+        @test !haskey(parsed_secrets, "private_notes")
+        @test length(parsed_secrets) == 2
     end
     
     @testset "Complex Nested Structs" begin

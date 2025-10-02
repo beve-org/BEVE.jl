@@ -89,6 +89,30 @@ println(reconstructed.name)  # "Alice"
 println(reconstructed.age)   # 30
 ```
 
+#### Skipping Struct Fields
+
+Exclude fields from serialization either declaratively with `@skip` or dynamically with `skip(::Type, ::Val, value)`:
+
+```julia
+struct Credentials
+    username::String
+    password::String
+    token::Union{String, Nothing}
+    session_id::String
+end
+
+# Skip password and session_id for every serialization
+BEVE.@skip Credentials password session_id
+
+# Skip token only when it is `nothing`
+BEVE.skip(::Type{Credentials}, ::Val{:token}, value) = value === nothing
+
+data = Credentials("alice", "secret", nothing, "sess-42")
+parsed = from_beve(to_beve(data))
+
+@assert keys(parsed) == ["username"]
+```
+
 ### Complex Nested Structures
 
 BEVE.jl handles deeply nested data structures:
