@@ -85,6 +85,37 @@ using BEVE
         @test reconstructed.name == person.name
         @test reconstructed.age == person.age
     end
+
+    @testset "Struct Field Skipping" begin
+        struct Credentials
+            username::String
+            password::String
+            token::Union{String, Nothing}
+        end
+
+        BEVE.skip(::Type{Credentials}) = (:password,)
+
+        function BEVE.ser_ignore_field(::Type{Credentials}, ::Val{:token}, value)
+            return value === nothing
+        end
+
+        credentials = Credentials("alice", "secret", "abc123")
+        parsed_credentials = from_beve(to_beve(credentials))
+
+        @test parsed_credentials isa Dict{String, Any}
+        @test parsed_credentials["username"] == "alice"
+        @test !haskey(parsed_credentials, "password")
+        @test parsed_credentials["token"] == "abc123"
+
+        credentials_without_token = Credentials("bob", "hidden", nothing)
+        parsed_without_token = from_beve(to_beve(credentials_without_token))
+
+        @test parsed_without_token isa Dict{String, Any}
+        @test parsed_without_token["username"] == "bob"
+        @test !haskey(parsed_without_token, "password")
+        @test !haskey(parsed_without_token, "token")
+        @test length(parsed_without_token) == 1
+    end
     
     @testset "Complex Nested Structs" begin
         # Define nested struct types

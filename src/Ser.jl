@@ -6,6 +6,21 @@
 (ser_type(::Type{T}, v::V)::V) where {T,V} = v
 (ser_ignore_field(::Type{T}, ::Val{x})::Bool) where {T,x} = false
 (ser_ignore_field(::Type{T}, k::Val{x}, v::V)::Bool) where {T,x,V} = ser_ignore_field(T, k)
+(skip(::Type{T})) where T = ()
+
+@inline function normalize_skip_fields(fields)
+    ignored = Symbol[]
+    for field in fields
+        if field isa Symbol
+            push!(ignored, field)
+        elseif field isa AbstractString
+            push!(ignored, Symbol(field))
+        else
+            throw(ArgumentError("Unsupported skip field identifier: $(repr(field))"))
+        end
+    end
+    return isempty(ignored) ? nothing : ignored
+end
 
 mutable struct BeveSerializer
     io::IO
@@ -677,18 +692,30 @@ function beve_value!(ser::BeveSerializer, val::T) where T
         # Serialize as a string-keyed object
         write(ser.io, STRING_OBJECT)
         fields = fieldnames(T)
-        write_size(ser, length(fields))
-        
+        declared_skipped = normalize_skip_fields(skip(T))
+        serialized_fields = Pair{String, Any}[]
+
         for field_name in fields
+            if declared_skipped !== nothing && field_name in declared_skipped
+                continue
+            end
             field_val = getfield(val, field_name)
             # Apply serialization transformations
             key = ser_name(T, Val(field_name))
             value = ser_type(T, ser_value(T, Val(field_name), field_val))
-            
-            if !ser_ignore_field(T, Val(field_name), value)
-                write_string_data(ser, string(key))
-                beve_value!(ser, value)
+
+            if ser_ignore_field(T, Val(field_name), value)
+                continue
             end
+
+            push!(serialized_fields, string(key) => value)
+        end
+
+        write_size(ser, length(serialized_fields))
+
+        for field_entry in serialized_fields
+            write_string_data(ser, field_entry.first)
+            beve_value!(ser, field_entry.second)
         end
     else
         error("Cannot serialize type $T to BEVE")
