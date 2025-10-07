@@ -390,6 +390,10 @@ function beve_value!(ser::BeveSerializer, val::Complex{T}) where T
 end
 
 # Arrays
+function beve_value!(ser::BeveSerializer, val::SubArray{T, 1, <:AbstractVector}) where T
+    beve_value!(ser, collect(val))
+end
+
 function beve_value!(ser::BeveSerializer, val::Vector{Bool})
     write(ser.io, BOOL_ARRAY)
     write_size(ser, length(val))
