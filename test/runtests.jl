@@ -116,10 +116,10 @@ using BEVE
     end
 
     @testset "Struct Field Skipping" begin
-        struct Credentials
+        Base.@kwdef struct Credentials
             username::String
-            password::String
-            token::Union{String, Nothing}
+            password::String = ""
+            token::Union{String, Nothing} = nothing
         end
 
         BEVE.@skip Credentials password
@@ -136,6 +136,14 @@ using BEVE
         @test !haskey(parsed_credentials, "password")
         @test parsed_credentials["token"] == "abc123"
 
+        beve_credentials = to_beve(credentials)
+        reconstructed_credentials = deser_beve(Credentials, beve_credentials)
+        @test reconstructed_credentials.username == "alice"
+        @test reconstructed_credentials.password == ""
+        @test reconstructed_credentials.token == "abc123"
+
+        @test_throws BEVE.BeveError deser_beve(Credentials, beve_credentials; error_on_missing_fields = true)
+
         credentials_without_token = Credentials("bob", "hidden", nothing)
         parsed_without_token = from_beve(to_beve(credentials_without_token))
 
@@ -144,13 +152,20 @@ using BEVE
         @test !haskey(parsed_without_token, "password")
         @test !haskey(parsed_without_token, "token")
         @test length(parsed_without_token) == 1
+
+        beve_without_token = to_beve(credentials_without_token)
+        roundtrip_without_token = deser_beve(Credentials, beve_without_token)
+        @test roundtrip_without_token.username == "bob"
+        @test roundtrip_without_token.password == ""
+        @test roundtrip_without_token.token === nothing
+        @test_throws BEVE.BeveError deser_beve(Credentials, beve_without_token; error_on_missing_fields = true)
     end
 
     @testset "Multiple Field Skipping" begin
-        struct Secrets
+        Base.@kwdef struct Secrets
             public_id::Int
-            api_key::String
-            private_notes::String
+            api_key::String = ""
+            private_notes::String = ""
             created_at::String
         end
 
@@ -165,6 +180,14 @@ using BEVE
         @test !haskey(parsed_secrets, "api_key")
         @test !haskey(parsed_secrets, "private_notes")
         @test length(parsed_secrets) == 2
+
+        beve_secrets = to_beve(secrets)
+        reconstructed_secrets = deser_beve(Secrets, beve_secrets)
+        @test reconstructed_secrets.public_id == 101
+        @test reconstructed_secrets.api_key == ""
+        @test reconstructed_secrets.private_notes == ""
+        @test reconstructed_secrets.created_at == "2024-01-01"
+        @test_throws BEVE.BeveError deser_beve(Secrets, beve_secrets; error_on_missing_fields = true)
     end
     
     @testset "Complex Nested Structs" begin
