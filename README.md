@@ -111,7 +111,15 @@ data = Credentials("alice", "secret", nothing, "sess-42")
 parsed = from_beve(to_beve(data))
 
 @assert keys(parsed) == ["username"]
+
+# Reconstructing with skipped fields
+deser_beve(Credentials, to_beve(data))
+
+# Enforce strict field presence
+deser_beve(Credentials, to_beve(data); error_on_missing_fields = true)
 ```
+
+By default `deser_beve` allows reconstruction even when fields were skipped in the serialized input, making it easy to rely on struct defaults. Set `error_on_missing_fields = true` to throw a `BeveError` whenever a field is absent.
 
 ### Complex Nested Structures
 

@@ -557,9 +557,16 @@ function from_beve(data::Vector{UInt8})
 end
 
 """
-    deser_beve(::Type{T}, data::Vector{UInt8}) -> T
+    deser_beve(::Type{T}, data::Vector{UInt8}; error_on_missing_fields::Bool = false) -> T
 
 Deserializes BEVE binary data into a specific type T.
+
+Leave `error_on_missing_fields` at its default (`false`) to allow reconstruction
+of structs even when some serialized fields are missing. This is useful when
+fields were intentionally skipped during serialization (for example via
+`BEVE.@skip`) and the target type can still be constructed via keyword defaults.
+Set it to `true` to enforce strict checking and throw a `BeveError` whenever a
+field is missing.
 
 ## Examples
 
@@ -573,7 +580,7 @@ julia> person_data = from_beve(beve_data)
 julia> person = deser_beve(Person, beve_data)
 ```
 """
-function deser_beve(::Type{T}, data::Vector{UInt8}) where T
+function deser_beve(::Type{T}, data::Vector{UInt8}; error_on_missing_fields::Bool = false) where T
     parsed = from_beve(data)
     
     # If T is a Dict type and parsed is also a Dict, just convert
@@ -581,7 +588,7 @@ function deser_beve(::Type{T}, data::Vector{UInt8}) where T
         return convert(T, parsed)
     elseif parsed isa Dict{String, Any}
         # Try to reconstruct the struct from the string dictionary
-        return reconstruct_struct(T, parsed)
+        return reconstruct_struct(T, parsed; error_on_missing_fields)
     elseif parsed isa Dict && T <: Dict
         # Handle integer-keyed dictionaries
         return convert(T, parsed)
@@ -594,11 +601,13 @@ function deser_beve(::Type{T}, data::Vector{UInt8}) where T
 end
 
 # Optimized struct reconstruction with pre-allocated arrays
-function reconstruct_struct(::Type{T}, data::Dict{String, Any}) where T
+function reconstruct_struct(::Type{T}, data::Dict{String, Any}; error_on_missing_fields::Bool = false) where T
     field_names = fieldnames(T)
     field_types = fieldtypes(T)
     num_fields = length(field_names)
     field_values = Vector{Any}(undef, num_fields)
+    present = falses(num_fields)
+    missing_fields = Symbol[]
     
     @inbounds for i in 1:num_fields
         fname = field_names[i]
@@ -619,14 +628,30 @@ function reconstruct_struct(::Type{T}, data::Dict{String, Any}) where T
                 field_values[i] = convert(field_type, field_val)
             elseif field_val isa Dict{String, Any} && !isempty(fieldnames(field_type))
                 # Recursively reconstruct nested struct
-                field_values[i] = reconstruct_struct(field_type, field_val)
+                field_values[i] = reconstruct_struct(field_type, field_val; error_on_missing_fields)
             else
                 field_values[i] = field_val
             end
+
+            present[i] = true
         else
-            throw(BeveError("Missing field: $fname_str for type $T"))
+            if error_on_missing_fields
+                throw(BeveError("Missing field: $fname_str for type $T"))
+            else
+                push!(missing_fields, fname)
+            end
         end
     end
     
-    return T(field_values...)
+    if isempty(missing_fields)
+        return T(field_values...)
+    end
+
+    present_indices = findall(present)
+    try
+        return T(; (field_names[idx] => field_values[idx] for idx in present_indices)...)
+    catch err
+        missing_list = join(string.(missing_fields), ", ")
+        throw(BeveError("Missing field(s): $missing_list for type $T and no compatible keyword constructor found. Original error: $(err)"))
+    end
 end
