@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v1
+        with:
+          version: '1.11'
+      - uses: julia-actions/cache@v1
+      - name: Install dependencies
+        run: julia --project -e 'import Pkg; Pkg.instantiate()'
+      - name: Run tests
+        run: julia --project -e 'import Pkg; Pkg.test()'

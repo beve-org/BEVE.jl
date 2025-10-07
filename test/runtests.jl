@@ -56,7 +56,36 @@ using BEVE
         @test result[3] == true
         @test result[4] ≈ 3.14
     end
-    
+
+    @testset "SubArray Support" begin
+        int_data = collect(1:6)
+        int_view = @view int_data[2:5]
+        @test from_beve(to_beve(int_view)) == collect(int_view)
+
+        bool_data = Bool[true, false, true, true, false, false]
+        bool_view = @view bool_data[1:4]
+        @test from_beve(to_beve(bool_view)) == collect(bool_view)
+
+        str_data = ["alpha", "beta", "gamma", "delta"]
+        str_view = @view str_data[2:4]
+        @test from_beve(to_beve(str_view)) == collect(str_view)
+    end
+
+    @testset "Struct With SubArray" begin
+        struct SubArrayHolder
+            label::String
+            slice::SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}
+        end
+
+        base_data = collect(10:20)
+        data_view = @view base_data[3:8]
+        holder = SubArrayHolder("numbers", data_view)
+
+        roundtrip = from_beve(to_beve(holder))
+        @test roundtrip["label"] == "numbers"
+        @test roundtrip["slice"] == collect(data_view)
+    end
+
     @testset "Objects" begin
         # Test dictionary
         dict = Dict("name" => "Alice", "age" => 30, "active" => true)
