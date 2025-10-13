@@ -397,6 +397,100 @@ using BEVE
         @test parsed["settings"]["max_members"] == 10
         @test parsed["settings"]["public"] == true
         @test parsed["settings"]["created_date"] == "2024-01-01"
+
+        # Ensure struct reconstruction succeeds
+        reconstructed_team = deser_beve(Team, beve_data)
+        @test reconstructed_team.name == team.name
+        @test reconstructed_team.settings == team.settings
+        @test length(reconstructed_team.members) == length(team.members)
+        @test all(m isa User for m in reconstructed_team.members)
+        @test reconstructed_team.members[1].name == team.members[1].name
+        @test reconstructed_team.members[1].tags == team.members[1].tags
+    end
+
+    @testset "Struct Reconstruction" begin
+        struct Measurement
+            value::Float64
+            unit::String
+        end
+
+        struct SensorReading
+            id::Int
+            readings::Vector{Measurement}
+        end
+
+        struct Panel
+            label::String
+            sensors::Vector{SensorReading}
+            notes::Vector{Union{String, Nothing}}
+        end
+
+        sensor_data = [
+            SensorReading(1, [Measurement(21.5, "C"), Measurement(22.0, "C")]),
+            SensorReading(2, [Measurement(55.0, "%"), Measurement(54.5, "%")])
+        ]
+        panel = Panel("Env Monitor", sensor_data, ["calibrated", nothing, "online"])
+
+        reconstructed_panel = deser_beve(Panel, to_beve(panel))
+        @test reconstructed_panel.label == panel.label
+        @test length(reconstructed_panel.sensors) == length(sensor_data)
+        @test reconstructed_panel.sensors[1].id == sensor_data[1].id
+        @test reconstructed_panel.sensors[1].readings[1].value ≈ sensor_data[1].readings[1].value
+        @test reconstructed_panel.notes == panel.notes
+
+        struct Payload
+            name::String
+            payload::Union{Nothing, Vector{Measurement}}
+        end
+
+        payload_with_data = Payload("sensor_payload", [Measurement(1.0, "V"), Measurement(2.0, "V")])
+        payload_none = Payload("empty_payload", nothing)
+
+        roundtrip_payload = deser_beve(Payload, to_beve(payload_with_data))
+        @test roundtrip_payload.name == payload_with_data.name
+        @test length(roundtrip_payload.payload) == length(payload_with_data.payload)
+        @test roundtrip_payload.payload[2].value ≈ payload_with_data.payload[2].value
+
+        roundtrip_payload_none = deser_beve(Payload, to_beve(payload_none))
+        @test roundtrip_payload_none.name == payload_none.name
+        @test roundtrip_payload_none.payload === nothing
+
+        struct Grid
+            name::String
+            rows::Vector{Vector{Int}}
+            columns::Vector{String}
+        end
+
+        grid = Grid(
+            "heatmap",
+            [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+            ["X", "Y", "Z"]
+        )
+
+        reconstructed_grid = deser_beve(Grid, to_beve(grid))
+        @test reconstructed_grid.name == grid.name
+        @test reconstructed_grid.rows == grid.rows
+        @test reconstructed_grid.columns == grid.columns
+
+        struct CatalogEntry
+            title::String
+            attributes::Dict{String, Any}
+        end
+
+        struct Catalog
+            entries::Vector{CatalogEntry}
+        end
+
+        catalog = Catalog([
+            CatalogEntry("book", Dict("pages" => 200, "authors" => ["Alice", "Bob"])),
+            CatalogEntry("gadget", Dict("weight" => 1.2, "tags" => ["electronics", "portable"]))
+        ])
+
+        reconstructed_catalog = deser_beve(Catalog, to_beve(catalog))
+        @test length(reconstructed_catalog.entries) == 2
+        @test reconstructed_catalog.entries[1].title == "book"
+        @test reconstructed_catalog.entries[1].attributes["pages"] == 200
+        @test reconstructed_catalog.entries[2].attributes["tags"] == ["electronics", "portable"]
     end
     
     @testset "Optional and Union Fields" begin

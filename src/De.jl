@@ -600,6 +600,71 @@ function deser_beve(::Type{T}, data::Vector{UInt8}; error_on_missing_fields::Boo
     end
 end
 
+# Helper utilities for struct reconstruction
+@inline function coerce_value(::Type{Any}, value; error_on_missing_fields::Bool = false)
+    return value
+end
+
+function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = false)
+    if value isa field_type
+        return value
+    elseif field_type isa Union
+        for subtype in Base.uniontypes(field_type)
+            converted = coerce_value(subtype, value; error_on_missing_fields)
+            if converted isa subtype
+                return converted
+            end
+        end
+        return value
+    elseif field_type <: AbstractString
+        return string(value)
+    elseif field_type <: Number
+        return field_type(value)
+    elseif field_type <: Dict && value isa Dict
+        return convert(field_type, value)
+    elseif field_type <: AbstractVector && value isa AbstractVector
+        return reconstruct_vector(field_type, value; error_on_missing_fields)
+    elseif Base.isstructtype(field_type) && value isa Dict{String, Any}
+        return reconstruct_struct(field_type, value; error_on_missing_fields)
+    else
+        return value
+    end
+end
+
+function reconstruct_vector(field_type::Type, data::AbstractVector; error_on_missing_fields::Bool = false)
+    if data isa field_type
+        return data
+    end
+
+    element_type = eltype(field_type)
+    if element_type === Any
+        if isconcretetype(field_type)
+            try
+                return convert(field_type, data)
+            catch
+                return data
+            end
+        else
+            return data
+        end
+    end
+
+    result = Vector{element_type}(undef, length(data))
+    @inbounds for (idx, item) in enumerate(data)
+        result[idx] = coerce_value(element_type, item; error_on_missing_fields)
+    end
+
+    if isconcretetype(field_type)
+        try
+            return convert(field_type, result)
+        catch
+            return result
+        end
+    else
+        return result
+    end
+end
+
 # Optimized struct reconstruction with pre-allocated arrays
 function reconstruct_struct(::Type{T}, data::Dict{String, Any}; error_on_missing_fields::Bool = false) where T
     field_names = fieldnames(T)
@@ -615,23 +680,7 @@ function reconstruct_struct(::Type{T}, data::Dict{String, Any}; error_on_missing
         if haskey(data, fname_str)
             field_val = data[fname_str]
             field_type = field_types[i]
-            
-            # Convert if necessary - optimized branches
-            if field_val isa field_type
-                field_values[i] = field_val
-            elseif field_type <: AbstractString
-                field_values[i] = string(field_val)
-            elseif field_type <: Number
-                field_values[i] = field_type(field_val)
-            elseif field_type <: Dict && field_val isa Dict
-                # Convert dict to specific dict type
-                field_values[i] = convert(field_type, field_val)
-            elseif field_val isa Dict{String, Any} && !isempty(fieldnames(field_type))
-                # Recursively reconstruct nested struct
-                field_values[i] = reconstruct_struct(field_type, field_val; error_on_missing_fields)
-            else
-                field_values[i] = field_val
-            end
+            field_values[i] = coerce_value(field_type, field_val; error_on_missing_fields)
 
             present[i] = true
         else
