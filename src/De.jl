@@ -1,7 +1,7 @@
 # BEVE Deserialization Module
 
-mutable struct BeveDeserializer
-    io::IO
+mutable struct BeveDeserializer{IOType<:IO}
+    io::IOType
     peek_byte::Union{Nothing, UInt8}
     read_buffer::Vector{UInt8}  # Pre-allocated buffer for reading
     temp_buffer::Vector{UInt8}  # Temporary working buffer
@@ -9,7 +9,7 @@ mutable struct BeveDeserializer
     preserve_matrices::Bool
 
     function BeveDeserializer(io::IO; preserve_matrices::Bool = false)
-        new(io, nothing, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64), preserve_matrices)
+        new{typeof(io)}(io, nothing, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64), preserve_matrices)
     end
 end
 

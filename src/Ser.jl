@@ -42,13 +42,13 @@ end
     return isempty(ignored) ? nothing : ignored
 end
 
-mutable struct BeveSerializer
-    io::IO
+mutable struct BeveSerializer{IOType<:IO}
+    io::IOType
     work_buffer::Vector{UInt8}  # Pre-allocated working buffer for conversions
     temp_buffer::Vector{UInt8}  # Temporary buffer for small operations
     
     function BeveSerializer(io::IO)
-        new(io, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64))
+        new{typeof(io)}(io, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64))
     end
 end
 
