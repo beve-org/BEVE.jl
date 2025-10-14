@@ -2,6 +2,8 @@ using Pkg
 Pkg.activate("..")
 using BEVE
 
+raw_from_beve(data) = from_beve(data; preserve_matrices = true)
+
 println("Comprehensive Matrix Validation Test")
 println("===================================\n")
 
@@ -37,7 +39,7 @@ for (name, matrix) in test_cases
     
     # Test round-trip in Julia
     read_data = read(filepath)
-    parsed = from_beve(read_data)
+    parsed = raw_from_beve(read_data)
     roundtrip_data = to_beve(parsed)
     
     status = read_data == roundtrip_data ? "✓" : "✗"
@@ -74,7 +76,7 @@ println("\nValidating C++ matrix structure...")
 cpp_matrix_path = "julia_generated/matrices/cpp_2x3_matrix.beve"
 if isfile(cpp_matrix_path)
     cpp_data = read(cpp_matrix_path)
-    cpp_matrix = from_beve(cpp_data)
+    cpp_matrix = raw_from_beve(cpp_data)
     
     # Validate structure
     checks = [

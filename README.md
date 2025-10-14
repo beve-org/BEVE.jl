@@ -177,6 +177,30 @@ println(parsed[1]["name"])    # "Laptop"
 println(parsed[2]["price"])   # 25.50
 ```
 
+### Matrices
+
+Julia `AbstractMatrix` and `Matrix{T}` values automatically use the BEVE matrix extension:
+
+```julia
+mat = Float32[1 2 3; 4 5 6]
+bytes = to_beve(mat)
+
+parsed = from_beve(bytes)                    # Matrix{Float32}
+raw = from_beve(bytes; preserve_matrices = true)  # BeveMatrix wrapper with layout/extents/data
+```
+
+Matrix fields inside structs are also reconstructed when using `deser_beve`:
+
+```julia
+struct Grid
+    values::Matrix{Float64}
+end
+
+grid = Grid([1.0 2.0; 3.0 4.0])
+roundtrip = deser_beve(Grid, to_beve(grid))
+@assert roundtrip.values == grid.values
+```
+
 ### Optional and Union Fields
 
 BEVE.jl supports optional fields and Union types:

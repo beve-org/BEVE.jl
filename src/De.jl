@@ -5,9 +5,11 @@ mutable struct BeveDeserializer
     peek_byte::Union{Nothing, UInt8}
     read_buffer::Vector{UInt8}  # Pre-allocated buffer for reading
     temp_buffer::Vector{UInt8}  # Temporary working buffer
-    
-    function BeveDeserializer(io::IO)
-        new(io, nothing, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64))
+
+    preserve_matrices::Bool
+
+    function BeveDeserializer(io::IO; preserve_matrices::Bool = false)
+        new(io, nothing, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64), preserve_matrices)
     end
 end
 
@@ -314,89 +316,215 @@ function parse_type_tag(deser::BeveDeserializer)
     return BEVE.BeveTypeTag(type_index, value)
 end
 
+const NUMERIC_MATRIX_HEADERS = UInt8[
+    F32_ARRAY, F64_ARRAY,
+    I8_ARRAY, I16_ARRAY, I32_ARRAY, I64_ARRAY,
+    U8_ARRAY, U16_ARRAY, U32_ARRAY, U64_ARRAY
+]
+
+@inline is_numeric_matrix_header(header::UInt8) = header in NUMERIC_MATRIX_HEADERS
+
 function parse_matrix(deser::BeveDeserializer)
     # Per BEVE spec: Matrices have a matrix header byte, extents, and value
     # Layout: HEADER | MATRIX HEADER | EXTENTS | VALUE
     
-    # Read the matrix header byte
     matrix_header = read_byte!(deser)
-    
-    # Extract layout from the first bit per BEVE spec
-    # 0 = row-major, 1 = column-major
-    # Since only bit 0 is specified, we check the whole byte for 0 or 1
     layout = matrix_header == 0 ? BEVE.LayoutRight : BEVE.LayoutLeft
     
-    # Read extents array header
-    # BEVE spec says "typed array of unsigned integers" but implementations may use signed
     extents_header = read_byte!(deser)
-    
-    # Parse the extents array - accept both signed and unsigned integer arrays
-    if extents_header == U8_ARRAY
-        extents = Int.(parse_u8_array(deser))
-    elseif extents_header == U16_ARRAY
-        extents = Int.(parse_u16_array(deser))
-    elseif extents_header == U32_ARRAY
-        extents = Int.(parse_u32_array(deser))
-    elseif extents_header == U64_ARRAY
-        extents = Int.(parse_u64_array(deser))
-    elseif extents_header == I8_ARRAY
-        extents = Int.(parse_i8_array(deser))
-    elseif extents_header == I16_ARRAY
-        extents = Int.(parse_i16_array(deser))
-    elseif extents_header == I32_ARRAY
-        extents = Int.(parse_i32_array(deser))
-    elseif extents_header == I64_ARRAY
-        extents = Int.(parse_i64_array(deser))
-    else
-        throw(BeveError("Matrix extents must be a typed integer array, got: $(header_name(extents_header))"))
+    extents = parse_matrix_extents(deser, extents_header)
+
+    if any(==(0), extents)
+        throw(BeveError("Matrix dimensions cannot be zero"))
     end
     
-    # Read the value (must be a typed array of numerical data)
     value_header = peek_byte!(deser)
+
+    if deser.preserve_matrices
+        data = parse_matrix_value(deser, value_header)
+        return BEVE.BeveMatrix(layout, extents, data)
+    end
     
-    # Check if it's a typed numerical array
-    if value_header == F32_ARRAY
-        data = parse_value(deser)
+    if length(extents) == 2
+        rows, cols = extents
+        if is_numeric_matrix_header(value_header)
+            return parse_numeric_matrix(deser, layout, rows, cols, value_header)
+        elseif value_header == COMPLEX
+            return parse_complex_matrix(deser, layout, rows, cols)
+        else
+            data = parse_matrix_value(deser, value_header)
+            return matrix_from_beve(layout, rows, cols, data)
+        end
+    else
+        data = parse_matrix_value(deser, value_header)
         return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == F64_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == I8_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == I16_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == I32_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == I64_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == U8_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == U16_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == U32_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == U64_ARRAY
-        data = parse_value(deser)
-        return BEVE.BeveMatrix(layout, extents, data)
-    elseif value_header == COMPLEX
-        # Handle complex arrays
-        data = parse_value(deser)
+    end
+end
+
+function parse_matrix_extents(deser::BeveDeserializer, header::UInt8)
+    if header == U8_ARRAY
+        return Int.(parse_u8_array(deser))
+    elseif header == U16_ARRAY
+        return Int.(parse_u16_array(deser))
+    elseif header == U32_ARRAY
+        return Int.(parse_u32_array(deser))
+    elseif header == U64_ARRAY
+        return Int.(parse_u64_array(deser))
+    elseif header == I8_ARRAY
+        return Int.(parse_i8_array(deser))
+    elseif header == I16_ARRAY
+        return Int.(parse_i16_array(deser))
+    elseif header == I32_ARRAY
+        return Int.(parse_i32_array(deser))
+    elseif header == I64_ARRAY
+        return Int.(parse_i64_array(deser))
+    else
+        throw(BeveError("Matrix extents must be a typed integer array, got: $(header_name(header))"))
+    end
+end
+
+function parse_numeric_matrix(deser::BeveDeserializer, layout::MatrixLayout, rows::Int, cols::Int, header::UInt8)
+    read_byte!(deser)  # consume value header
+    count = read_size(deser)
+    expected = rows * cols
+    if count != expected
+        throw(BeveError("Matrix data length $count does not match product of extents $expected"))
+    end
+
+    T = matrix_element_type(header)
+    T === nothing && throw(BeveError("Unsupported numeric matrix type: $(header_name(header))"))
+
+    if layout == BEVE.LayoutLeft
+        matrix = Matrix{T}(undef, rows, cols)
+        if count > 0
+            GC.@preserve matrix begin
+                linear = unsafe_wrap(Vector{T}, pointer(matrix), count; own=false)
+                read_array_data!(deser, linear)
+            end
+        end
+        return matrix
+    else
+        buffer = Vector{T}(undef, count)
+        read_array_data!(deser, buffer)
+        return matrix_from_beve(BEVE.LayoutRight, rows, cols, buffer)
+    end
+end
+
+function matrix_element_type(header::UInt8)
+    if header == F32_ARRAY
+        return Float32
+    elseif header == F64_ARRAY
+        return Float64
+    elseif header == I8_ARRAY
+        return Int8
+    elseif header == I16_ARRAY
+        return Int16
+    elseif header == I32_ARRAY
+        return Int32
+    elseif header == I64_ARRAY
+        return Int64
+    elseif header == U8_ARRAY
+        return UInt8
+    elseif header == U16_ARRAY
+        return UInt16
+    elseif header == U32_ARRAY
+        return UInt32
+    elseif header == U64_ARRAY
+        return UInt64
+    else
+        return nothing
+    end
+end
+
+function parse_complex_matrix(deser::BeveDeserializer, layout::MatrixLayout, rows::Int, cols::Int)
+    read_byte!(deser)  # consume COMPLEX header
+    data = parse_complex(deser)
+    if data isa Vector
+        return matrix_from_beve(layout, rows, cols, data)
+    else
+        throw(BeveError("Matrix value must be an array, got single complex number"))
+    end
+end
+
+function parse_matrix_value(deser::BeveDeserializer, header::UInt8)
+    if header == COMPLEX
+        read_byte!(deser)
+        data = parse_complex(deser)
         if data isa Vector
-            return BEVE.BeveMatrix(layout, extents, data)
+            return data
         else
             throw(BeveError("Matrix value must be an array, got single complex number"))
         end
+    elseif header == BOOL_ARRAY
+        read_byte!(deser)
+        return parse_bool_array(deser)
+    elseif header == F32_ARRAY
+        read_byte!(deser)
+        return parse_f32_array(deser)
+    elseif header == F64_ARRAY
+        read_byte!(deser)
+        return parse_f64_array(deser)
+    elseif header == I8_ARRAY
+        read_byte!(deser)
+        return parse_i8_array(deser)
+    elseif header == I16_ARRAY
+        read_byte!(deser)
+        return parse_i16_array(deser)
+    elseif header == I32_ARRAY
+        read_byte!(deser)
+        return parse_i32_array(deser)
+    elseif header == I64_ARRAY
+        read_byte!(deser)
+        return parse_i64_array(deser)
+    elseif header == U8_ARRAY
+        read_byte!(deser)
+        return parse_u8_array(deser)
+    elseif header == U16_ARRAY
+        read_byte!(deser)
+        return parse_u16_array(deser)
+    elseif header == U32_ARRAY
+        read_byte!(deser)
+        return parse_u32_array(deser)
+    elseif header == U64_ARRAY
+        read_byte!(deser)
+        return parse_u64_array(deser)
     else
-        throw(BeveError("Matrix value must be a typed array of numerical data, got: $(header_name(value_header))"))
+        throw(BeveError("Matrix value must be a typed array of numerical data, got: $(header_name(header))"))
     end
 end
+
+function matrix_from_beve(layout::MatrixLayout, rows::Int, cols::Int, data::Vector{T}) where T
+    if rows == 0 || cols == 0
+        throw(BeveError("Matrix dimensions cannot be zero"))
+    end
+
+    total = rows * cols
+    if length(data) != total
+        throw(BeveError("Matrix data length $(length(data)) does not match product of extents $total"))
+    end
+
+    if layout == BEVE.LayoutLeft
+        matrix = Matrix{T}(undef, rows, cols)
+        if total > 0
+            copyto!(matrix, 1, data, 1, total)
+        end
+        return matrix
+    else
+        matrix = Matrix{T}(undef, rows, cols)
+        idx = 1
+        @inbounds for i in 1:rows
+            for j in 1:cols
+                matrix[i, j] = data[idx]
+                idx += 1
+            end
+        end
+        return matrix
+    end
+end
+
+matrix_from_beve(layout::MatrixLayout, extents::Vector{Int}, data::Vector{T}) where T =
+    length(extents) == 2 ? matrix_from_beve(layout, extents[1], extents[2], data) :
+    throw(BeveError("Cannot convert matrix with $(length(extents)) dimensions to a 2D Matrix"))
 
 function parse_string_object(deser::BeveDeserializer)::Dict{String, Any}
     size = read_size(deser)
@@ -538,7 +666,7 @@ function parse_generic_array(deser::BeveDeserializer)::Vector{Any}
 end
 
 """
-    from_beve(data::Vector{UInt8}) -> Any
+    from_beve(data::Vector{UInt8}; preserve_matrices::Bool = false) -> Any
 
 Deserializes BEVE binary data back to Julia objects.
 
@@ -548,16 +676,20 @@ Deserializes BEVE binary data back to Julia objects.
 julia> data = UInt8[0x03, 0x08, ...]  # Some BEVE binary data
 
 julia> result = from_beve(data)
+
+julia> raw = from_beve(data; preserve_matrices = true)
 ```
 """
-function from_beve(data::Vector{UInt8})
+function from_beve(data::Vector{UInt8}; preserve_matrices::Bool = false)
     io = IOBuffer(data)
-    deser = BeveDeserializer(io)
+    deser = BeveDeserializer(io; preserve_matrices = preserve_matrices)
     return parse_value(deser)
 end
 
 """
-    deser_beve(::Type{T}, data::Vector{UInt8}; error_on_missing_fields::Bool = false) -> T
+    deser_beve(::Type{T}, data::Vector{UInt8};
+               error_on_missing_fields::Bool = false,
+               preserve_matrices::Bool = false) -> T
 
 Deserializes BEVE binary data into a specific type T.
 
@@ -580,8 +712,10 @@ julia> person_data = from_beve(beve_data)
 julia> person = deser_beve(Person, beve_data)
 ```
 """
-function deser_beve(::Type{T}, data::Vector{UInt8}; error_on_missing_fields::Bool = false) where T
-    parsed = from_beve(data)
+function deser_beve(::Type{T}, data::Vector{UInt8};
+                    error_on_missing_fields::Bool = false,
+                    preserve_matrices::Bool = false) where T
+    parsed = from_beve(data; preserve_matrices = preserve_matrices)
     
     # If T is a Dict type and parsed is also a Dict, just convert
     if T <: Dict && parsed isa Dict
@@ -595,6 +729,8 @@ function deser_beve(::Type{T}, data::Vector{UInt8}; error_on_missing_fields::Boo
     elseif parsed isa Dict
         # If parsed is an integer-keyed dict but T is not a Dict, error
         throw(BeveError("Cannot convert integer-keyed dictionary to type $T"))
+    elseif parsed isa BEVE.BeveMatrix && T <: BEVE.BeveMatrix
+        return parsed
     else
         return T(parsed)
     end
@@ -622,10 +758,41 @@ function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = f
         return field_type(value)
     elseif field_type <: Dict && value isa Dict
         return convert(field_type, value)
+    elseif field_type <: AbstractMatrix
+        return reconstruct_matrix(field_type, value; error_on_missing_fields)
     elseif field_type <: AbstractVector && value isa AbstractVector
         return reconstruct_vector(field_type, value; error_on_missing_fields)
     elseif Base.isstructtype(field_type) && value isa Dict{String, Any}
         return reconstruct_struct(field_type, value; error_on_missing_fields)
+    else
+        return value
+    end
+end
+
+function reconstruct_matrix(field_type::Type, value; error_on_missing_fields::Bool = false)
+    if value isa field_type
+        return value
+    elseif value isa BEVE.BeveMatrix
+        matrix = matrix_from_beve(value.layout, value.extents, value.data)
+        if isconcretetype(field_type)
+            try
+                return convert(field_type, matrix)
+            catch
+                return matrix
+            end
+        else
+            return matrix
+        end
+    elseif value isa AbstractMatrix
+        if isconcretetype(field_type)
+            try
+                return convert(field_type, value)
+            catch
+                return value
+            end
+        else
+            return value
+        end
     else
         return value
     end

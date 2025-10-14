@@ -2,6 +2,8 @@ using Pkg
 Pkg.activate("..")
 using BEVE
 
+raw_from_beve(data) = from_beve(data; preserve_matrices = true)
+
 println("Testing BEVE Matrices")
 println("====================")
 
@@ -13,7 +15,7 @@ println("  Serialized $(length(data1)) bytes")
 println("  Bytes: ", bytes2hex(data1))
 
 # Deserialize and verify
-result1 = from_beve(data1)
+result1 = raw_from_beve(data1)
 println("  Layout: $(result1.layout == LayoutRight ? "row-major" : "column-major")")
 println("  Extents: $(result1.extents)")
 println("  Data: $(result1.data)")
@@ -28,7 +30,7 @@ matrix2 = BeveMatrix(LayoutLeft, [2, 4], Float64[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7
 data2 = to_beve(matrix2)
 println("  Serialized $(length(data2)) bytes")
 
-result2 = from_beve(data2)
+result2 = raw_from_beve(data2)
 println("  Layout: $(result2.layout == LayoutRight ? "row-major" : "column-major")")
 println("  Extents: $(result2.extents)")
 @assert result2.layout == LayoutLeft
@@ -42,7 +44,7 @@ matrix3 = BeveMatrix(LayoutRight, [2, 3, 4], Int32[i for i in 1:24])
 data3 = to_beve(matrix3)
 println("  Serialized $(length(data3)) bytes")
 
-result3 = from_beve(data3)
+result3 = raw_from_beve(data3)
 println("  Extents: $(result3.extents)")
 println("  Total elements: $(prod(result3.extents))")
 @assert result3.layout == LayoutRight
@@ -57,7 +59,7 @@ matrix4 = BeveMatrix(LayoutRight, [2, 3], complex_data)
 data4 = to_beve(matrix4)
 println("  Serialized $(length(data4)) bytes")
 
-result4 = from_beve(data4)
+result4 = raw_from_beve(data4)
 println("  Extents: $(result4.extents)")
 println("  First element: $(result4.data[1])")
 @assert result4.layout == LayoutRight
@@ -71,7 +73,7 @@ matrix5 = BeveMatrix(LayoutRight, [10], Float32[i*0.1f0 for i in 1:10])
 data5 = to_beve(matrix5)
 println("  Serialized $(length(data5)) bytes")
 
-result5 = from_beve(data5)
+result5 = raw_from_beve(data5)
 println("  Extents: $(result5.extents)")
 @assert result5.extents == [10]
 @assert length(result5.data) == 10
@@ -90,8 +92,8 @@ data6b = to_beve(matrix6b)
 println("  Medium extents: serialized $(length(data6b)) bytes")
 
 # Check that different extent sizes work
-result6a = from_beve(data6a)
-result6b = from_beve(data6b)
+result6a = raw_from_beve(data6a)
+result6b = raw_from_beve(data6b)
 @assert result6a.extents == [10, 20]
 @assert result6b.extents == [300, 400]
 println("  ✓ Large extents test passed")
@@ -112,7 +114,7 @@ matrix8 = BeveMatrix(LayoutRight, [2, 2, 2, 2, 2], Float32[i for i in 1:32])
 data8 = to_beve(matrix8)
 println("  5D matrix serialized $(length(data8)) bytes")
 
-result8 = from_beve(data8)
+result8 = raw_from_beve(data8)
 @assert result8.extents == [2, 2, 2, 2, 2]
 @assert prod(result8.extents) == 32
 println("  ✓ High-dimensional matrix test passed")
