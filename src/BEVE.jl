@@ -39,10 +39,10 @@ end
 BeveMatrix(layout::MatrixLayout, extents::Vector{Int}, data::Vector{T}) where T = BeveMatrix{T}(layout, extents, data)
 
 # Exports for serialization
-export to_beve, to_beve!, BeveTypeTag, BeveMatrix, MatrixLayout, LayoutRight, LayoutLeft, @skip
+export to_beve, to_beve!, write_beve_file, BeveTypeTag, BeveMatrix, MatrixLayout, LayoutRight, LayoutLeft, @skip
 
 # Exports for deserialization  
-export from_beve, deser_beve
+export from_beve, read_beve_file, deser_beve, deser_beve_file
 
 include("Headers.jl")
 include("Ser.jl")

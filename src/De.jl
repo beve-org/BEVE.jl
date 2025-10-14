@@ -687,6 +687,35 @@ function from_beve(data::Vector{UInt8}; preserve_matrices::Bool = false)
 end
 
 """
+    read_beve_file(path::AbstractString; preserve_matrices::Bool = false) -> Any
+
+Load a BEVE-encoded file from `path` by first reading it into a contiguous
+`Vector{UInt8}` buffer and then deserializing it with `from_beve`.
+"""
+function read_beve_file(path::AbstractString; preserve_matrices::Bool = false)
+    data = read(path)
+    return from_beve(data; preserve_matrices = preserve_matrices)
+end
+
+"""
+    deser_beve_file(::Type{T}, path::AbstractString;
+                    error_on_missing_fields::Bool = false,
+                    preserve_matrices::Bool = false) -> T
+
+Read and deserialize a BEVE-encoded file directly into the Julia type `T`.
+Internally the file is loaded into a contiguous buffer before calling
+[`deser_beve`](@ref).
+"""
+function deser_beve_file(::Type{T}, path::AbstractString;
+                         error_on_missing_fields::Bool = false,
+                         preserve_matrices::Bool = false) where T
+    data = read(path)
+    return deser_beve(T, data;
+                      error_on_missing_fields = error_on_missing_fields,
+                      preserve_matrices = preserve_matrices)
+end
+
+"""
     deser_beve(::Type{T}, data::Vector{UInt8};
                error_on_missing_fields::Bool = false,
                preserve_matrices::Bool = false) -> T

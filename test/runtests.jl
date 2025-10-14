@@ -2,6 +2,56 @@ using Test
 using BEVE
 
 @testset "BEVE.jl" begin
+    @testset "File Helpers" begin
+        sample = Dict("message" => "hello", "values" => [1, 2, 3])
+        struct FilePerson
+            name::String
+            age::Int
+        end
+
+        struct MissingField
+            a::Int
+            b::Int
+        end
+
+        mktempdir() do tmp
+            path = joinpath(tmp, "sample.beve")
+
+            bytes = write_beve_file(path, sample)
+            @test read(path) == bytes
+            @test bytes == to_beve(sample)
+            @test read_beve_file(path) == sample
+
+            matrix = Float32[1 2; 3 4]
+            reuse_buffer = IOBuffer()
+            matrix_path = joinpath(tmp, "matrix.beve")
+            matrix_bytes = write_beve_file(matrix_path, matrix; buffer = reuse_buffer)
+            @test matrix_bytes == to_beve(matrix)
+            @test read_beve_file(matrix_path) == matrix
+
+            preserved = read_beve_file(matrix_path; preserve_matrices = true)
+            @test preserved isa BEVE.BeveMatrix{Float32}
+            @test preserved.layout == BEVE.LayoutLeft
+            @test preserved.extents == [2, 2]
+            @test preserved.data == vec(matrix)
+
+            person = FilePerson("Ada", 37)
+            person_path = joinpath(tmp, "person.beve")
+            write_beve_file(person_path, person)
+            @test deser_beve_file(FilePerson, person_path) == person
+
+            matrix_raw = deser_beve_file(BEVE.BeveMatrix{Float32}, matrix_path; preserve_matrices = true)
+            @test matrix_raw isa BEVE.BeveMatrix{Float32}
+            @test matrix_raw.layout == preserved.layout
+            @test matrix_raw.extents == preserved.extents
+            @test matrix_raw.data == preserved.data
+
+            dict_path = joinpath(tmp, "missing.beve")
+            write(dict_path, to_beve(Dict("a" => 1)))
+            @test_throws BEVE.BeveError deser_beve_file(MissingField, dict_path; error_on_missing_fields = true)
+        end
+    end
+
     @testset "Basic Types" begin
         # Test null
         data = to_beve(nothing)
