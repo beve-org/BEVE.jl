@@ -861,3 +861,26 @@ function to_beve!(io::IOBuffer, data)::Vector{UInt8}
     beve_value!(ser, data)
     return take!(io)
 end
+
+"""
+    write_beve_file(path::AbstractString, data; buffer::Union{Nothing, IOBuffer} = nothing) -> Vector{UInt8}
+
+Serialize `data` into BEVE binary form and persist it to `path`.
+
+The function first writes into an intermediate contiguous `IOBuffer` to avoid
+streaming directly to disk, then flushes the resulting bytes with a single
+`write`. Pass a reusable `IOBuffer` via the `buffer` keyword to amortize
+allocations across repeated calls. The serialized bytes are returned.
+"""
+function write_beve_file(path::AbstractString, data; buffer::Union{Nothing, IOBuffer} = nothing)::Vector{UInt8}
+    io = buffer === nothing ? IOBuffer() : buffer
+    seekstart(io)
+    truncate(io, 0)
+    ser = BeveSerializer(io)
+    beve_value!(ser, data)
+    bytes = take!(io)
+    open(path, "w") do file_io
+        write(file_io, bytes)
+    end
+    return bytes
+end

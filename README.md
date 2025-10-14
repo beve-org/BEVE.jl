@@ -28,6 +28,28 @@ using BEVE
 
 ## Basic Usage
 
+### File Helpers
+
+Use `write_beve_file(path, data; buffer=...)` to serialize Julia objects straight
+to disk via an intermediate contiguous `IOBuffer`. Reusing a buffer avoids
+allocations when writing many files. `read_beve_file(path; preserve_matrices)`
+and `deser_beve_file(T, path; kwargs...)` load the entire file into memory before
+deserializing, which matches the non-streaming performance profile of the
+serializer.
+
+```julia
+sample = Dict("message" => "hello", "values" => [1, 2, 3])
+write_beve_file("sample.beve", sample)
+
+matrix = Float32[1 2; 3 4]
+buf = IOBuffer()
+write_beve_file("matrix.beve", matrix; buffer = buf)  # buffer reused across writes
+
+read_beve_file("sample.beve")                  # -> Dict
+read_beve_file("matrix.beve"; preserve_matrices = true)  # -> BeveMatrix wrapper
+deser_beve_file(Matrix{Float32}, "matrix.beve")  # -> Matrix{Float32}
+```
+
 ### Serialization and Deserialization
 
 ```julia
