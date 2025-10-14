@@ -57,6 +57,104 @@ using BEVE
         @test result[4] ≈ 3.14
     end
 
+    @testset "Matrices" begin
+        @testset "Column-major defaults" begin
+            matrix = Float32[1 2 3; 4 5 6]
+            bytes = to_beve(matrix)
+            parsed = from_beve(bytes)
+            @test parsed isa Matrix{Float32}
+            @test parsed == matrix
+
+            raw = from_beve(bytes; preserve_matrices = true)
+            @test raw isa BEVE.BeveMatrix
+            @test raw.layout == BEVE.LayoutLeft
+            @test raw.extents == [2, 3]
+            @test raw.data == vec(matrix)
+
+            raw_again = deser_beve(BEVE.BeveMatrix{Float32}, bytes; preserve_matrices = true)
+            @test raw_again isa BEVE.BeveMatrix{Float32}
+            @test raw_again.data == vec(matrix)
+        end
+
+        @testset "Numeric element types" begin
+            int_matrix = reshape(Int32(1):Int32(6), 2, 3)
+            @test from_beve(to_beve(int_matrix)) == int_matrix
+
+            uint_matrix = reshape(UInt16(1):UInt16(9), 3, 3)
+            parsed_uint = from_beve(to_beve(uint_matrix))
+            @test parsed_uint isa Matrix{UInt16}
+            @test parsed_uint == uint_matrix
+
+            float_matrix = reshape(Float64(1):Float64(9), 3, 3)
+            @test from_beve(to_beve(float_matrix)) == float_matrix
+        end
+
+        @testset "Row-major roundtrip" begin
+            expected = Float64[1 2 3; 4 5 6]
+            row_major = BEVE.BeveMatrix(BEVE.LayoutRight, [2, 3], Float64[1, 2, 3, 4, 5, 6])
+            parsed_row = from_beve(to_beve(row_major))
+            @test parsed_row isa Matrix{Float64}
+            @test parsed_row == expected
+        end
+
+        @testset "Complex matrices" begin
+            complex_matrix = ComplexF64[ComplexF64(i, -i) for i in 1:6]
+            complex_matrix = reshape(complex_matrix, 2, 3)
+            parsed_complex = from_beve(to_beve(complex_matrix))
+            @test parsed_complex isa Matrix{ComplexF64}
+            @test parsed_complex == complex_matrix
+
+            raw_complex = from_beve(to_beve(complex_matrix); preserve_matrices = true)
+            @test raw_complex isa BEVE.BeveMatrix{ComplexF64}
+            @test raw_complex.data == vec(complex_matrix)
+        end
+
+        @testset "Strided and view matrices" begin
+            base = reshape(Float32.(1:12), 3, 4)
+            view_matrix = @view base[:, 1:2:4]
+            parsed_view = from_beve(to_beve(view_matrix))
+            @test parsed_view isa Matrix{Float32}
+            @test parsed_view == Matrix(view_matrix)
+
+            permuted = permutedims(base)
+            parsed_permuted = from_beve(to_beve(permuted))
+            @test parsed_permuted == Matrix(permuted)
+        end
+
+        @testset "Struct reconstruction" begin
+            struct MatrixHolder
+                weights::Matrix{Float64}
+                grads::Matrix{Float32}
+            end
+
+            holder = MatrixHolder([1.0 2.0; 3.0 4.0], Float32[0.1 0.2; 0.3 0.4])
+            roundtrip_holder = deser_beve(MatrixHolder, to_beve(holder))
+            @test roundtrip_holder.weights == holder.weights
+            @test roundtrip_holder.grads == holder.grads
+
+            struct NestedContainer
+                items::Vector{Matrix{Float32}}
+                stats::Dict{String, Matrix{Int}}
+            end
+
+            nested = NestedContainer(
+                [Float32[1 2; 3 4], Float32[5 6; 7 8]],
+                Dict("ones" => ones(Int, 2, 2), "identity" => [1 0; 0 1])
+            )
+
+            parsed_nested = deser_beve(NestedContainer, to_beve(nested))
+            @test parsed_nested.items == nested.items
+            @test parsed_nested.stats == nested.stats
+        end
+
+        @testset "Higher-dimensional remains raw" begin
+            tensor = BEVE.BeveMatrix(BEVE.LayoutLeft, [2, 2, 2], Float32[1, 2, 3, 4, 5, 6, 7, 8])
+            parsed_tensor = from_beve(to_beve(tensor))
+            @test parsed_tensor isa BEVE.BeveMatrix
+            @test parsed_tensor.extents == [2, 2, 2]
+        end
+    end
+
     @testset "SubArray Support" begin
         int_data = collect(1:6)
         int_view = @view int_data[2:5]

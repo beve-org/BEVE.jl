@@ -389,6 +389,65 @@ function beve_value!(ser::BeveSerializer, val::Complex{T}) where T
     end
 end
 
+# Matrices
+function beve_value!(ser::BeveSerializer, val::AbstractMatrix{T}) where T
+    rows, cols = size(val)
+    if rows == 0 || cols == 0
+        throw(ArgumentError("Matrix dimensions cannot be zero"))
+    end
+
+    extents = Int[rows, cols]
+
+    if val isa Matrix{T}
+        total = length(val)
+        GC.@preserve val begin
+            data = unsafe_wrap(Vector{T}, pointer(val), total; own=false)
+            beve_value!(ser, BEVE.BeveMatrix(BEVE.LayoutLeft, extents, data))
+        end
+        return
+    end
+
+    layout, data = collect_matrix_data_for_serialization(val, rows, cols)
+    beve_value!(ser, BEVE.BeveMatrix(layout, extents, data))
+end
+
+@inline function collect_matrix_data_for_serialization(val::AbstractMatrix{T}, rows::Int, cols::Int) where T
+    if val isa StridedMatrix{T}
+        s1, s2 = strides(val)
+        if s1 == 1 && s2 == rows
+            return BEVE.LayoutLeft, copy_matrix_column_major(val, rows, cols)
+        elseif s2 == 1 && s1 == cols
+            return BEVE.LayoutRight, copy_matrix_row_major(val, rows, cols)
+        end
+    end
+
+    return BEVE.LayoutLeft, copy_matrix_column_major(val, rows, cols)
+end
+
+@inline function copy_matrix_column_major(val::AbstractMatrix{T}, rows::Int, cols::Int) where T
+    total = rows * cols
+    data = Vector{T}(undef, total)
+    idx = 1
+    @inbounds for element in val
+        data[idx] = element
+        idx += 1
+    end
+    return data
+end
+
+@inline function copy_matrix_row_major(val::AbstractMatrix{T}, rows::Int, cols::Int) where T
+    total = rows * cols
+    data = Vector{T}(undef, total)
+    idx = 1
+    @inbounds for i in 1:rows
+        for j in 1:cols
+            data[idx] = val[i, j]
+            idx += 1
+        end
+    end
+    return data
+end
+
 # Arrays
 function beve_value!(ser::BeveSerializer, val::SubArray{T, 1, <:AbstractVector}) where T
     beve_value!(ser, collect(val))

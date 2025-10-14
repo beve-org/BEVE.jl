@@ -11,7 +11,7 @@ println("Read $(length(data)) bytes from cpp_2x3_matrix.beve")
 println("Hex: ", bytes2hex(data))
 
 # Parse it
-matrix = from_beve(data)
+matrix = from_beve(data; preserve_matrices = true)
 println("\nParsed matrix:")
 println("  Type: $(typeof(matrix))")
 println("  Layout: $(matrix.layout == LayoutRight ? "row-major" : "column-major")")
