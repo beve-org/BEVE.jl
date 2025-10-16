@@ -4,11 +4,21 @@ authors = ["Stephen Berry <stephenberry.developer@gmail.com>"]
 version = "1.4.2"
 
 [weakdeps]
+CodecZstd = "6b39b394-51ab-5f42-8807-6242bab2b4c2"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 
 [extensions]
+CodecZstdExt = "CodecZstd"
 HTTPExt = "HTTP"
 
 [compat]
+CodecZstd = "0.8"
 HTTP = "1"
 julia = "1.9"
+
+[extras]
+CodecZstd = "6b39b394-51ab-5f42-8807-6242bab2b4c2"
+Test = "8dfed614-5729-5b0f-aeef-512c0d43c1eb"
+
+[targets]
+test = ["Test", "CodecZstd"]

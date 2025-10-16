@@ -39,10 +39,12 @@ end
 BeveMatrix(layout::MatrixLayout, extents::Vector{Int}, data::Vector{T}) where T = BeveMatrix{T}(layout, extents, data)
 
 # Exports for serialization
-export to_beve, to_beve!, write_beve_file, BeveTypeTag, BeveMatrix, MatrixLayout, LayoutRight, LayoutLeft, @skip
+export to_beve, to_beve!, write_beve_file, to_beve_zstd, write_beve_zstd_file,
+       BeveTypeTag, BeveMatrix, MatrixLayout, LayoutRight, LayoutLeft, @skip
 
 # Exports for deserialization  
-export from_beve, read_beve_file, deser_beve, deser_beve_file
+export from_beve, read_beve_file, from_beve_zstd, read_beve_zstd_file,
+       deser_beve, deser_beve_file, deser_beve_zstd, deser_beve_zstd_file
 
 include("Headers.jl")
 include("Ser.jl")
@@ -53,6 +55,14 @@ function register_object end
 function unregister_object end
 function start_server end
 function BeveHttpClient end  # Function stub instead of struct
+
+# CodecZstd helper stubs - implemented when CodecZstd.jl is available
+function to_beve_zstd end
+function from_beve_zstd end
+function write_beve_zstd_file end
+function read_beve_zstd_file end
+function deser_beve_zstd end
+function deser_beve_zstd_file end
 
 # Export the HTTP functions (they'll only work when HTTP.jl is loaded)
 export register_object, unregister_object, start_server, BeveHttpClient
