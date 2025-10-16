@@ -7,3 +7,4 @@ beve_validation/cpp_benchmark_results.csv
 beve_validation/julia_benchmark_results.csv
 *.png
 /build
+/.julia

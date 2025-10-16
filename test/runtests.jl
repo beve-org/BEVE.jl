@@ -49,6 +49,60 @@ using BEVE
             dict_path = joinpath(tmp, "missing.beve")
             write(dict_path, to_beve(Dict("a" => 1)))
             @test_throws BEVE.BeveError deser_beve_file(MissingField, dict_path; error_on_missing_fields = true)
+    end
+    end
+
+    @testset "Zstd Helpers" begin
+        codec_available = try
+            Base.require(Base.PkgId(Base.UUID("6b39b394-51ab-5f42-8807-6242bab2b4c2"), "CodecZstd"))
+            true
+        catch err
+            @info "Skipping Zstd tests: CodecZstd not available" exception = err
+            false
+        end
+        codec_available || return
+
+        sample = Dict("message" => "hello", "values" => [1, 2, 3])
+        compressed = to_beve_zstd(sample)
+        @test from_beve_zstd(compressed) == sample
+
+        matrix = Float32[1 2; 3 4]
+        buffer = IOBuffer()
+        compressed_matrix = to_beve_zstd(matrix; buffer = buffer, level = 7)
+        restored = from_beve_zstd(compressed_matrix; preserve_matrices = true)
+        @test restored isa BEVE.BeveMatrix{Float32}
+        @test restored.layout == BEVE.LayoutLeft
+        @test restored.extents == [2, 2]
+        @test restored.data == vec(matrix)
+
+        struct ZstdPerson
+            name::String
+            age::Int
+        end
+
+        person = ZstdPerson("Ada", 37)
+        person_bytes = to_beve_zstd(person)
+        @test deser_beve_zstd(ZstdPerson, person_bytes) == person
+
+        mktempdir() do tmp
+            path = joinpath(tmp, "sample.beve.zst")
+            bytes = write_beve_zstd_file(path, sample)
+            @test endswith(path, ".beve.zst")
+            @test read(path) == bytes
+            @test read_beve_zstd_file(path) == sample
+
+            matrix_path = joinpath(tmp, "matrix.beve.zst")
+            matrix_bytes = write_beve_zstd_file(matrix_path, matrix; buffer = buffer)
+            @test matrix_bytes == compressed_matrix
+            matrix_restored = read_beve_zstd_file(matrix_path; preserve_matrices = true)
+            @test matrix_restored.layout == restored.layout
+            @test matrix_restored.data == restored.data
+
+            person_path = joinpath(tmp, "person.beve.zst")
+            write_beve_zstd_file(person_path, person)
+            @test deser_beve_zstd_file(ZstdPerson, person_path) == person
+            @test deser_beve_zstd_file(BEVE.BeveMatrix{Float32}, matrix_path;
+                                       preserve_matrices = true).data == restored.data
         end
     end
 
