@@ -261,6 +261,48 @@ To run the test suite:
 julia --project=. -e "import Pkg; Pkg.test()"
 ```
 
+## Optional Zstandard Compression
+
+BEVE ships an optional extension that wraps [CodecZstd.jl](https://github.com/JuliaIO/CodecZstd.jl) so you can read and write `.beve.zst` files. The helpers are no-ops unless `CodecZstd` is available; install it explicitly when you want compressed output:
+
+```julia
+using Pkg
+Pkg.add("CodecZstd")  # add only when you need compression
+```
+
+Once `CodecZstd` is in the environment, the extension activates automatically and provides four new helpers:
+
+- `to_beve_zstd(data; buffer=nothing, level=3)` – compress the result of `to_beve`.
+- `from_beve_zstd(bytes; preserve_matrices=false)` – decompress then call `from_beve`.
+- `write_beve_zstd_file(path, data; buffer=nothing, level=3)` – write `.beve.zst` files.
+- `read_beve_zstd_file(path; preserve_matrices=false)` – read `.beve.zst` files.
+- `deser_beve_zstd(::Type{T}, bytes; kwargs...)` and `deser_beve_zstd_file(::Type{T}, path; kwargs...)` mirror their uncompressed counterparts when you want structs back directly.
+
+The helper defaults reuse any `IOBuffer` you pass via `buffer` to avoid reallocations. Files created with `write_beve_zstd_file` (and the struct variant) should use the `.beve.zst` suffix so tools can recognize the codec.
+
+Example:
+
+```julia
+using BEVE
+using CodecZstd  # activates the extension
+
+sample = Dict("message" => "hello")
+compressed = to_beve_zstd(sample, level = 5)
+@assert from_beve_zstd(compressed) == sample
+
+struct Person
+    name::String
+    age::Int
+end
+
+person = Person("Ada", 37)
+bytes = to_beve_zstd(person)
+@assert deser_beve_zstd(Person, bytes) == person
+
+write_beve_zstd_file("person.beve.zst", person)
+@assert deser_beve_zstd_file(Person, "person.beve.zst") == person
+```
+
 ## Optional HTTP Support
 
 BEVE.jl includes optional HTTP server and client functionality through a package extension. HTTP.jl is now an optional dependency - you only need it if you want to use HTTP features.
