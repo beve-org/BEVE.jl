@@ -1,7 +1,7 @@
 # BEVE Serialization Module
 
 # Serialization interface functions (can be overridden)
-(ser_name(::Type{T}, ::Val{x})::Symbol) where {T,x} = x
+(ser_name(::Type{T}, ::Val{x})::Symbol) where {T,x} = x isa Symbol ? x : Symbol(string(x))
 (ser_value(::Type{T}, ::Val{x}, v::V)::V) where {T,x,V} = v
 (ser_type(::Type{T}, v::V)::V) where {T,V} = v
 (skip(::Type{T})) where T = ()
@@ -750,6 +750,15 @@ function beve_value!(ser::BeveSerializer, val::AbstractDict)
         string_dict[string(k)] = v
     end
     beve_value!(ser, string_dict)
+end
+
+# Handle tuples (serialize as generic arrays)
+function beve_value!(ser::BeveSerializer, val::Tuple)
+    write(ser.io, GENERIC_ARRAY)
+    write_size(ser, length(val))
+    for item in val
+        beve_value!(ser, item)
+    end
 end
 
 # Handle struct serialization

@@ -791,6 +791,8 @@ function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = f
         return reconstruct_matrix(field_type, value; error_on_missing_fields)
     elseif field_type <: AbstractVector && value isa AbstractVector
         return reconstruct_vector(field_type, value; error_on_missing_fields)
+    elseif field_type <: Tuple
+        return reconstruct_tuple(field_type, value; error_on_missing_fields)
     elseif Base.isstructtype(field_type) && value isa Dict{String, Any}
         return reconstruct_struct(field_type, value; error_on_missing_fields)
     else
@@ -861,6 +863,45 @@ function reconstruct_vector(field_type::Type, data::AbstractVector; error_on_mis
     end
 end
 
+function reconstruct_tuple(field_type::Type, value; error_on_missing_fields::Bool = false)
+    if value isa field_type
+        return value
+    elseif value isa Tuple
+        if isconcretetype(field_type)
+            try
+                return convert(field_type, value)
+            catch
+                return value
+            end
+        else
+            return value
+        end
+    elseif value isa AbstractVector
+        if isconcretetype(field_type)
+            element_types = fieldtypes(field_type)
+            if !isempty(element_types) && length(element_types) == length(value)
+                converted = ntuple(i -> coerce_value(element_types[i], value[i]; error_on_missing_fields = error_on_missing_fields), length(element_types))
+                try
+                    return convert(field_type, converted)
+                catch
+                    return converted
+                end
+            else
+                tuple_value = Tuple(value)
+                try
+                    return convert(field_type, tuple_value)
+                catch
+                    return tuple_value
+                end
+            end
+        else
+            return Tuple(value)
+        end
+    else
+        return value
+    end
+end
+
 # Optimized struct reconstruction with pre-allocated arrays
 function reconstruct_struct(::Type{T}, data::Dict{String, Any}; error_on_missing_fields::Bool = false) where T
     field_names = fieldnames(T)
@@ -889,7 +930,16 @@ function reconstruct_struct(::Type{T}, data::Dict{String, Any}; error_on_missing
     end
     
     if isempty(missing_fields)
-        return T(field_values...)
+        if T <: NamedTuple
+            return T(tuple(field_values...))
+        else
+            return T(field_values...)
+        end
+    end
+
+    if T <: NamedTuple
+        missing_list = join(string.(missing_fields), ", ")
+        throw(BeveError("Missing field(s): $missing_list for type $T"))
     end
 
     present_indices = findall(present)
