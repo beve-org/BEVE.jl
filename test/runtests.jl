@@ -52,6 +52,43 @@ using BEVE
     end
     end
 
+    @testset "Tuple Serialization" begin
+        float_tuple = (1.5, 2.5)
+        tuple_bytes = to_beve(float_tuple)
+        @test from_beve(tuple_bytes) == Any[1.5, 2.5]
+        @test deser_beve(Tuple{Float64, Float64}, tuple_bytes) == float_tuple
+
+        struct TupleWrapper
+            coords::Tuple{Float64, Float64}
+            label::String
+        end
+
+        wrapped = TupleWrapper((3.0, 4.0), "pos")
+        roundtrip = deser_beve(TupleWrapper, to_beve(wrapped))
+        @test roundtrip.label == wrapped.label
+        @test roundtrip.coords == wrapped.coords
+
+        struct NTupleHolder
+            data::NTuple{2, Float64}
+        end
+
+        holder = NTupleHolder((7.0, 9.0))
+        parsed_holder = deser_beve(NTupleHolder, to_beve(holder))
+        @test parsed_holder.data == holder.data
+
+        named_tuple = (x = 11.0, y = 13.0)
+        named_bytes = to_beve(named_tuple)
+        @test from_beve(named_bytes) == Dict("x" => 11.0, "y" => 13.0)
+        @test deser_beve(NamedTuple{(:x, :y), Tuple{Float64, Float64}}, named_bytes) == named_tuple
+
+        struct NamedTupleHolder
+            point::NamedTuple{(:x, :y), Tuple{Float64, Float64}}
+        end
+
+        holder = NamedTupleHolder((x = 2.0, y = 5.0))
+        @test deser_beve(NamedTupleHolder, to_beve(holder)) == holder
+    end
+
     @testset "Zstd Helpers" begin
         codec_available = try
             Base.require(Base.PkgId(Base.UUID("6b39b394-51ab-5f42-8807-6242bab2b4c2"), "CodecZstd"))
