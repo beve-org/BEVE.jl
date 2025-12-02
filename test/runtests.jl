@@ -738,26 +738,283 @@ using BEVE
             optional_number::Union{Int, Nothing}
             optional_string::Union{String, Nothing}
         end
-        
+
         # Test with values present
         data1 = OptionalData("required", 42, "optional")
         beve_data1 = to_beve(data1)
         parsed1 = from_beve(beve_data1)
-        
+
         @test parsed1["required_field"] == "required"
         @test parsed1["optional_number"] == 42
         @test parsed1["optional_string"] == "optional"
-        
+
         # Test with nothing values
         data2 = OptionalData("required", nothing, nothing)
         beve_data2 = to_beve(data2)
         parsed2 = from_beve(beve_data2)
-        
+
         @test parsed2["required_field"] == "required"
         @test parsed2["optional_number"] === nothing
         @test parsed2["optional_string"] === nothing
     end
-    
+
+    @testset "Union Type Coercion" begin
+        # Test basic Union coercion with Int and String
+        struct UnionHolder
+            value::Union{Int, String}
+        end
+
+        # Int value should coerce correctly
+        int_holder = UnionHolder(42)
+        roundtrip_int = deser_beve(UnionHolder, to_beve(int_holder))
+        @test roundtrip_int.value == 42
+        @test roundtrip_int.value isa Int
+
+        # String value should coerce correctly
+        str_holder = UnionHolder("hello")
+        roundtrip_str = deser_beve(UnionHolder, to_beve(str_holder))
+        @test roundtrip_str.value == "hello"
+        @test roundtrip_str.value isa String
+
+        # Test Union{Nothing, T} coercion (common pattern)
+        struct NullableHolder
+            data::Union{Nothing, Vector{Int}}
+        end
+
+        with_data = NullableHolder([1, 2, 3])
+        roundtrip_with = deser_beve(NullableHolder, to_beve(with_data))
+        @test roundtrip_with.data == [1, 2, 3]
+
+        without_data = NullableHolder(nothing)
+        roundtrip_without = deser_beve(NullableHolder, to_beve(without_data))
+        @test roundtrip_without.data === nothing
+
+        # Test Union with multiple numeric types - exercises try-catch
+        # When coercing an Int to Union{Float64, Int}, both should work
+        struct MultiNumericUnion
+            num::Union{Float64, Int}
+        end
+
+        int_num = MultiNumericUnion(10)
+        roundtrip_int_num = deser_beve(MultiNumericUnion, to_beve(int_num))
+        @test roundtrip_int_num.num == 10
+
+        float_num = MultiNumericUnion(3.14)
+        roundtrip_float_num = deser_beve(MultiNumericUnion, to_beve(float_num))
+        @test roundtrip_float_num.num ≈ 3.14
+
+        # Test Union with struct types
+        struct TypeA
+            a::Int
+        end
+
+        struct TypeB
+            b::String
+        end
+
+        struct UnionStructHolder
+            item::Union{TypeA, TypeB}
+        end
+
+        holder_a = UnionStructHolder(TypeA(100))
+        roundtrip_a = deser_beve(UnionStructHolder, to_beve(holder_a))
+        @test roundtrip_a.item isa TypeA
+        @test roundtrip_a.item.a == 100
+
+        holder_b = UnionStructHolder(TypeB("test"))
+        roundtrip_b = deser_beve(UnionStructHolder, to_beve(holder_b))
+        @test roundtrip_b.item isa TypeB
+        @test roundtrip_b.item.b == "test"
+
+        # Test Union in Vector elements
+        struct VectorUnionHolder
+            items::Vector{Union{Int, String}}
+        end
+
+        mixed_vec = VectorUnionHolder(Union{Int, String}[1, "two", 3, "four"])
+        roundtrip_vec = deser_beve(VectorUnionHolder, to_beve(mixed_vec))
+        @test roundtrip_vec.items[1] == 1
+        @test roundtrip_vec.items[2] == "two"
+        @test roundtrip_vec.items[3] == 3
+        @test roundtrip_vec.items[4] == "four"
+
+        # Test three-way Union
+        struct TripleUnion
+            val::Union{Int, String, Float64}
+        end
+
+        triple_int = TripleUnion(42)
+        @test deser_beve(TripleUnion, to_beve(triple_int)).val == 42
+
+        triple_str = TripleUnion("hello")
+        @test deser_beve(TripleUnion, to_beve(triple_str)).val == "hello"
+
+        triple_float = TripleUnion(2.718)
+        @test deser_beve(TripleUnion, to_beve(triple_float)).val ≈ 2.718
+
+        # Test Union with Nothing and struct - common API pattern
+        struct ApiResponse
+            success::Bool
+            data::Union{Nothing, Dict{String, Any}}
+            error_msg::Union{Nothing, String}
+        end
+
+        success_response = ApiResponse(true, Dict("id" => 1, "name" => "test"), nothing)
+        roundtrip_success = deser_beve(ApiResponse, to_beve(success_response))
+        @test roundtrip_success.success == true
+        @test roundtrip_success.data["id"] == 1
+        @test roundtrip_success.error_msg === nothing
+
+        error_response = ApiResponse(false, nothing, "Not found")
+        roundtrip_error = deser_beve(ApiResponse, to_beve(error_response))
+        @test roundtrip_error.success == false
+        @test roundtrip_error.data === nothing
+        @test roundtrip_error.error_msg == "Not found"
+
+        # Test nested Union types
+        struct NestedUnionOuter
+            inner::Union{Nothing, Vector{Union{Int, String}}}
+        end
+
+        nested_with = NestedUnionOuter(Union{Int, String}[1, "a", 2, "b"])
+        roundtrip_nested = deser_beve(NestedUnionOuter, to_beve(nested_with))
+        @test roundtrip_nested.inner[1] == 1
+        @test roundtrip_nested.inner[2] == "a"
+
+        nested_without = NestedUnionOuter(nothing)
+        @test deser_beve(NestedUnionOuter, to_beve(nested_without)).inner === nothing
+    end
+
+    @testset "Error Message Context" begin
+        # Test that error messages identify the struct type with the missing field
+        # Use unique struct names to avoid conflicts with earlier testsets
+        struct ErrGeoCoordinates
+            latitude::Float64
+            longitude::Float64
+        end
+
+        struct ErrAddress
+            street::String
+            city::String
+            coords::ErrGeoCoordinates
+        end
+
+        struct ErrPerson
+            name::String
+            age::Int
+            address::ErrAddress
+        end
+
+        # Test missing field error at top level
+        incomplete_person = Dict("name" => "Alice")  # missing 'age' and 'address'
+        bytes = to_beve(incomplete_person)
+        err = nothing
+        try
+            deser_beve(ErrPerson, bytes; error_on_missing_fields = true)
+        catch e
+            err = e
+        end
+        @test err isa BEVE.BeveError
+        @test err.msg == "Missing field 'age' for type ErrPerson"
+
+        # Test nested struct error - identifies the nested type
+        nested_incomplete = Dict(
+            "name" => "Bob",
+            "age" => 30,
+            "address" => Dict(
+                "street" => "123 Main St",
+                "city" => "Springfield",
+                "coords" => Dict("latitude" => 40.7128)  # missing 'longitude'
+            )
+        )
+        bytes_nested = to_beve(nested_incomplete)
+        err_nested = nothing
+        try
+            deser_beve(ErrPerson, bytes_nested; error_on_missing_fields = true)
+        catch e
+            err_nested = e
+        end
+        @test err_nested isa BEVE.BeveError
+        @test err_nested.msg == "Missing field 'longitude' for type ErrGeoCoordinates"
+
+        # Test byte position in parsing errors - invalid header
+        invalid_bytes = UInt8[0xFF]
+        parse_err = nothing
+        try
+            from_beve(invalid_bytes)
+        catch e
+            parse_err = e
+        end
+        @test parse_err isa BEVE.BeveError
+        @test parse_err.msg == "Unsupported header: unknown type (0xff) at byte 1"
+
+        # Test truncated data error includes position
+        truncated = UInt8[0x04]  # STRING header but no size/data
+        trunc_err = nothing
+        try
+            from_beve(truncated)
+        catch e
+            trunc_err = e
+        end
+        @test trunc_err isa BEVE.BeveError
+        @test trunc_err.msg == "Unexpected end of data at byte 1"
+
+        # Test error in array element - identifies the element type
+        struct ErrTeam
+            members::Vector{ErrPerson}
+        end
+
+        team_incomplete = Dict(
+            "members" => [
+                Dict("name" => "Alice", "age" => 25, "address" => Dict(
+                    "street" => "1 First St", "city" => "Boston",
+                    "coords" => Dict("latitude" => 42.3, "longitude" => -71.0)
+                )),
+                Dict("name" => "Bob", "age" => 30),  # missing 'address' at index 2
+                Dict("name" => "Carol", "age" => 28, "address" => Dict(
+                    "street" => "3 Third St", "city" => "Chicago",
+                    "coords" => Dict("latitude" => 41.8, "longitude" => -87.6)
+                ))
+            ]
+        )
+        bytes_team = to_beve(team_incomplete)
+        err_team = nothing
+        try
+            deser_beve(ErrTeam, bytes_team; error_on_missing_fields = true)
+        catch e
+            err_team = e
+        end
+        @test err_team isa BEVE.BeveError
+        @test err_team.msg == "Missing field 'address' for type ErrPerson"
+
+        # Test deeply nested error - identifies the innermost type
+        struct ErrCompany
+            name::String
+            teams::Vector{ErrTeam}
+        end
+
+        company_incomplete = Dict(
+            "name" => "Acme Corp",
+            "teams" => [
+                Dict("members" => [
+                    Dict("name" => "Dave", "age" => 35, "address" => Dict(
+                        "street" => "HQ", "city" => "NYC",
+                        "coords" => Dict("latitude" => 40.7)  # missing 'longitude'
+                    ))
+                ])
+            ]
+        )
+        bytes_company = to_beve(company_incomplete)
+        err_company = nothing
+        try
+            deser_beve(ErrCompany, bytes_company; error_on_missing_fields = true)
+        catch e
+            err_company = e
+        end
+        @test err_company isa BEVE.BeveError
+        @test err_company.msg == "Missing field 'longitude' for type ErrGeoCoordinates"
+    end
+
     @testset "HTTP Extension Loading" begin
         # Test that HTTP functions work when HTTP.jl is loaded
         using HTTP
