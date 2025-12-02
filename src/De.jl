@@ -783,8 +783,8 @@ function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = f
         return value
     elseif field_type <: AbstractString
         return string(value)
-    elseif field_type <: Number
-        return field_type(value)
+    elseif field_type <: Number && value isa Number
+        return convert(field_type, value)
     elseif field_type <: Dict && value isa Dict
         return convert(field_type, value)
     elseif field_type <: AbstractMatrix
@@ -794,7 +794,13 @@ function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = f
     elseif field_type <: Tuple
         return reconstruct_tuple(field_type, value; error_on_missing_fields)
     elseif Base.isstructtype(field_type) && value isa Dict{String, Any}
-        return reconstruct_struct(field_type, value; error_on_missing_fields)
+        # Use try-catch for struct reconstruction since field compatibility
+        # cannot be reliably determined without knowing which fields have defaults
+        try
+            return reconstruct_struct(field_type, value; error_on_missing_fields)
+        catch
+            return value
+        end
     else
         return value
     end
