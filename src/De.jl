@@ -5,13 +5,21 @@ mutable struct BeveDeserializer{IOType<:IO}
     peek_byte::Union{Nothing, UInt8}
     read_buffer::Vector{UInt8}  # Pre-allocated buffer for reading
     temp_buffer::Vector{UInt8}  # Temporary working buffer
+    pos::UInt64                 # Current byte position for error reporting
 
     preserve_matrices::Bool
 
     function BeveDeserializer(io::IO; preserve_matrices::Bool = false)
-        new{typeof(io)}(io, nothing, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64), preserve_matrices)
+        new{typeof(io)}(io, nothing, Vector{UInt8}(undef, 8192), Vector{UInt8}(undef, 64), UInt64(0), preserve_matrices)
     end
 end
+
+# Context for struct reconstruction
+struct ReconstructionContext
+    error_on_missing::Bool
+end
+
+ReconstructionContext(; error_on_missing::Bool = false) = ReconstructionContext(error_on_missing)
 
 # Function lookup table for fast header dispatch
 const HEADER_PARSERS = Dict{UInt8, Function}(
@@ -68,13 +76,15 @@ function read_byte!(deser::BeveDeserializer)::UInt8
     if deser.peek_byte !== nothing
         b = deser.peek_byte
         deser.peek_byte = nothing
+        deser.pos += 1
         return b
     end
-    
+
     if eof(deser.io)
-        throw(BeveError("Unexpected end of data"))
+        throw(BeveError("Unexpected end of data at byte $(deser.pos)"))
     end
-    
+
+    deser.pos += 1
     return read(deser.io, UInt8)
 end
 
@@ -82,11 +92,11 @@ function peek_byte!(deser::BeveDeserializer)::UInt8
     if deser.peek_byte !== nothing
         return deser.peek_byte
     end
-    
+
     if eof(deser.io)
-        throw(BeveError("Unexpected end of data"))
+        throw(BeveError("Unexpected end of data at byte $(deser.pos)"))
     end
-    
+
     deser.peek_byte = read(deser.io, UInt8)
     return deser.peek_byte
 end
@@ -197,7 +207,7 @@ function parse_value(deser::BeveDeserializer)
     if parser !== nothing
         return parser(deser)
     else
-        throw(BeveError("Unsupported header: $(header_name(header)) (0x$(string(header, base=16)))"))
+        throw(BeveError("Unsupported header: $(header_name(header)) (0x$(string(header, base=16))) at byte $(deser.pos)"))
     end
 end
 
@@ -216,15 +226,15 @@ function parse_complex(deser::BeveDeserializer)
     
     # Only floating point complex numbers are currently supported
     if type_bits != 0
-        throw(BeveError("Only floating point complex numbers are supported"))
+        throw(BeveError("Only floating point complex numbers are supported at byte $(deser.pos)"))
     end
-    
+
     # Calculate byte count from index: 1 << byte_count_idx
     byte_count = 1 << byte_count_idx
-    
+
     # Validate expected byte counts for complex floats
     if byte_count != 4 && byte_count != 8
-        throw(BeveError("Unsupported complex float size: $byte_count bytes"))
+        throw(BeveError("Unsupported complex float size: $byte_count bytes at byte $(deser.pos)"))
     end
     
     if is_array != 0
@@ -335,7 +345,7 @@ function parse_matrix(deser::BeveDeserializer)
     extents = parse_matrix_extents(deser, extents_header)
 
     if any(==(0), extents)
-        throw(BeveError("Matrix dimensions cannot be zero"))
+        throw(BeveError("Matrix dimensions cannot be zero at byte $(deser.pos)"))
     end
     
     value_header = peek_byte!(deser)
@@ -379,7 +389,7 @@ function parse_matrix_extents(deser::BeveDeserializer, header::UInt8)
     elseif header == I64_ARRAY
         return Int.(parse_i64_array(deser))
     else
-        throw(BeveError("Matrix extents must be a typed integer array, got: $(header_name(header))"))
+        throw(BeveError("Matrix extents must be a typed integer array, got: $(header_name(header)) at byte $(deser.pos)"))
     end
 end
 
@@ -388,11 +398,11 @@ function parse_numeric_matrix(deser::BeveDeserializer, layout::MatrixLayout, row
     count = read_size(deser)
     expected = rows * cols
     if count != expected
-        throw(BeveError("Matrix data length $count does not match product of extents $expected"))
+        throw(BeveError("Matrix data length $count does not match product of extents $expected at byte $(deser.pos)"))
     end
 
     T = matrix_element_type(header)
-    T === nothing && throw(BeveError("Unsupported numeric matrix type: $(header_name(header))"))
+    T === nothing && throw(BeveError("Unsupported numeric matrix type: $(header_name(header)) at byte $(deser.pos)"))
 
     if layout == BEVE.LayoutLeft
         matrix = Matrix{T}(undef, rows, cols)
@@ -442,7 +452,7 @@ function parse_complex_matrix(deser::BeveDeserializer, layout::MatrixLayout, row
     if data isa Vector
         return matrix_from_beve(layout, rows, cols, data)
     else
-        throw(BeveError("Matrix value must be an array, got single complex number"))
+        throw(BeveError("Matrix value must be an array, got single complex number at byte $(deser.pos)"))
     end
 end
 
@@ -453,7 +463,7 @@ function parse_matrix_value(deser::BeveDeserializer, header::UInt8)
         if data isa Vector
             return data
         else
-            throw(BeveError("Matrix value must be an array, got single complex number"))
+            throw(BeveError("Matrix value must be an array, got single complex number at byte $(deser.pos)"))
         end
     elseif header == BOOL_ARRAY
         read_byte!(deser)
@@ -489,7 +499,7 @@ function parse_matrix_value(deser::BeveDeserializer, header::UInt8)
         read_byte!(deser)
         return parse_u64_array(deser)
     else
-        throw(BeveError("Matrix value must be a typed array of numerical data, got: $(header_name(header))"))
+        throw(BeveError("Matrix value must be a typed array of numerical data, got: $(header_name(header)) at byte $(deser.pos)"))
     end
 end
 
@@ -745,13 +755,14 @@ function deser_beve(::Type{T}, data::Vector{UInt8};
                     error_on_missing_fields::Bool = false,
                     preserve_matrices::Bool = false) where T
     parsed = from_beve(data; preserve_matrices = preserve_matrices)
-    
+    ctx = ReconstructionContext(; error_on_missing = error_on_missing_fields)
+
     # If T is a Dict type and parsed is also a Dict, just convert
     if T <: Dict && parsed isa Dict
         return convert(T, parsed)
     elseif parsed isa Dict{String, Any}
         # Try to reconstruct the struct from the string dictionary
-        return reconstruct_struct(T, parsed; error_on_missing_fields)
+        return reconstruct_struct(T, parsed, ctx)
     elseif parsed isa Dict && T <: Dict
         # Handle integer-keyed dictionaries
         return convert(T, parsed)
@@ -766,16 +777,16 @@ function deser_beve(::Type{T}, data::Vector{UInt8};
 end
 
 # Helper utilities for struct reconstruction
-@inline function coerce_value(::Type{Any}, value; error_on_missing_fields::Bool = false)
+@inline function coerce_value(::Type{Any}, value, ctx::ReconstructionContext = ReconstructionContext())
     return value
 end
 
-function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = false)
+function coerce_value(field_type::Type, value, ctx::ReconstructionContext = ReconstructionContext())
     if value isa field_type
         return value
     elseif field_type isa Union
         for subtype in Base.uniontypes(field_type)
-            converted = coerce_value(subtype, value; error_on_missing_fields)
+            converted = coerce_value(subtype, value, ctx)
             if converted isa subtype
                 return converted
             end
@@ -788,17 +799,19 @@ function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = f
     elseif field_type <: Dict && value isa Dict
         return convert(field_type, value)
     elseif field_type <: AbstractMatrix
-        return reconstruct_matrix(field_type, value; error_on_missing_fields)
+        return reconstruct_matrix(field_type, value, ctx)
     elseif field_type <: AbstractVector && value isa AbstractVector
-        return reconstruct_vector(field_type, value; error_on_missing_fields)
+        return reconstruct_vector(field_type, value, ctx)
     elseif field_type <: Tuple
-        return reconstruct_tuple(field_type, value; error_on_missing_fields)
+        return reconstruct_tuple(field_type, value, ctx)
     elseif Base.isstructtype(field_type) && value isa Dict{String, Any}
         # Use try-catch for struct reconstruction since field compatibility
         # cannot be reliably determined without knowing which fields have defaults
         try
-            return reconstruct_struct(field_type, value; error_on_missing_fields)
-        catch
+            return reconstruct_struct(field_type, value, ctx)
+        catch e
+            # Re-throw BeveErrors (e.g., missing field with error_on_missing=true)
+            e isa BeveError && rethrow()
             return value
         end
     else
@@ -806,7 +819,7 @@ function coerce_value(field_type::Type, value; error_on_missing_fields::Bool = f
     end
 end
 
-function reconstruct_matrix(field_type::Type, value; error_on_missing_fields::Bool = false)
+function reconstruct_matrix(field_type::Type, value, ctx::ReconstructionContext = ReconstructionContext())
     if value isa field_type
         return value
     elseif value isa BEVE.BeveMatrix
@@ -835,7 +848,7 @@ function reconstruct_matrix(field_type::Type, value; error_on_missing_fields::Bo
     end
 end
 
-function reconstruct_vector(field_type::Type, data::AbstractVector; error_on_missing_fields::Bool = false)
+function reconstruct_vector(field_type::Type, data::AbstractVector, ctx::ReconstructionContext = ReconstructionContext())
     if data isa field_type
         return data
     end
@@ -855,7 +868,7 @@ function reconstruct_vector(field_type::Type, data::AbstractVector; error_on_mis
 
     result = Vector{element_type}(undef, length(data))
     @inbounds for (idx, item) in enumerate(data)
-        result[idx] = coerce_value(element_type, item; error_on_missing_fields)
+        result[idx] = coerce_value(element_type, item, ctx)
     end
 
     if isconcretetype(field_type)
@@ -869,7 +882,7 @@ function reconstruct_vector(field_type::Type, data::AbstractVector; error_on_mis
     end
 end
 
-function reconstruct_tuple(field_type::Type, value; error_on_missing_fields::Bool = false)
+function reconstruct_tuple(field_type::Type, value, ctx::ReconstructionContext = ReconstructionContext())
     if value isa field_type
         return value
     elseif value isa Tuple
@@ -886,7 +899,9 @@ function reconstruct_tuple(field_type::Type, value; error_on_missing_fields::Boo
         if isconcretetype(field_type)
             element_types = fieldtypes(field_type)
             if !isempty(element_types) && length(element_types) == length(value)
-                converted = ntuple(i -> coerce_value(element_types[i], value[i]; error_on_missing_fields = error_on_missing_fields), length(element_types))
+                converted = ntuple(length(element_types)) do i
+                    coerce_value(element_types[i], value[i], ctx)
+                end
                 try
                     return convert(field_type, converted)
                 catch
@@ -909,32 +924,32 @@ function reconstruct_tuple(field_type::Type, value; error_on_missing_fields::Boo
 end
 
 # Optimized struct reconstruction with pre-allocated arrays
-function reconstruct_struct(::Type{T}, data::Dict{String, Any}; error_on_missing_fields::Bool = false) where T
+function reconstruct_struct(::Type{T}, data::Dict{String, Any}, ctx::ReconstructionContext = ReconstructionContext()) where T
     field_names = fieldnames(T)
     field_types = fieldtypes(T)
     num_fields = length(field_names)
     field_values = Vector{Any}(undef, num_fields)
     present = falses(num_fields)
     missing_fields = Symbol[]
-    
+
     @inbounds for i in 1:num_fields
         fname = field_names[i]
         fname_str = string(fname)
         if haskey(data, fname_str)
             field_val = data[fname_str]
             field_type = field_types[i]
-            field_values[i] = coerce_value(field_type, field_val; error_on_missing_fields)
+            field_values[i] = coerce_value(field_type, field_val, ctx)
 
             present[i] = true
         else
-            if error_on_missing_fields
-                throw(BeveError("Missing field: $fname_str for type $T"))
+            if ctx.error_on_missing
+                throw(BeveError("Missing field '$fname_str' for type $T"))
             else
                 push!(missing_fields, fname)
             end
         end
     end
-    
+
     if isempty(missing_fields)
         if T <: NamedTuple
             return T(tuple(field_values...))
@@ -953,6 +968,6 @@ function reconstruct_struct(::Type{T}, data::Dict{String, Any}; error_on_missing
         return T(; (field_names[idx] => field_values[idx] for idx in present_indices)...)
     catch err
         missing_list = join(string.(missing_fields), ", ")
-        throw(BeveError("Missing field(s): $missing_list for type $T and no compatible keyword constructor found. Original error: $(err)"))
+        throw(BeveError("Missing field(s): $missing_list for type $T. No compatible keyword constructor found. Original error: $(err)"))
     end
 end

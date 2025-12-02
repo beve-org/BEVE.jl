@@ -884,7 +884,137 @@ using BEVE
         nested_without = NestedUnionOuter(nothing)
         @test deser_beve(NestedUnionOuter, to_beve(nested_without)).inner === nothing
     end
-    
+
+    @testset "Error Message Context" begin
+        # Test that error messages identify the struct type with the missing field
+        # Use unique struct names to avoid conflicts with earlier testsets
+        struct ErrGeoCoordinates
+            latitude::Float64
+            longitude::Float64
+        end
+
+        struct ErrAddress
+            street::String
+            city::String
+            coords::ErrGeoCoordinates
+        end
+
+        struct ErrPerson
+            name::String
+            age::Int
+            address::ErrAddress
+        end
+
+        # Test missing field error at top level
+        incomplete_person = Dict("name" => "Alice")  # missing 'age' and 'address'
+        bytes = to_beve(incomplete_person)
+        err = nothing
+        try
+            deser_beve(ErrPerson, bytes; error_on_missing_fields = true)
+        catch e
+            err = e
+        end
+        @test err isa BEVE.BeveError
+        @test err.msg == "Missing field 'age' for type ErrPerson"
+
+        # Test nested struct error - identifies the nested type
+        nested_incomplete = Dict(
+            "name" => "Bob",
+            "age" => 30,
+            "address" => Dict(
+                "street" => "123 Main St",
+                "city" => "Springfield",
+                "coords" => Dict("latitude" => 40.7128)  # missing 'longitude'
+            )
+        )
+        bytes_nested = to_beve(nested_incomplete)
+        err_nested = nothing
+        try
+            deser_beve(ErrPerson, bytes_nested; error_on_missing_fields = true)
+        catch e
+            err_nested = e
+        end
+        @test err_nested isa BEVE.BeveError
+        @test err_nested.msg == "Missing field 'longitude' for type ErrGeoCoordinates"
+
+        # Test byte position in parsing errors - invalid header
+        invalid_bytes = UInt8[0xFF]
+        parse_err = nothing
+        try
+            from_beve(invalid_bytes)
+        catch e
+            parse_err = e
+        end
+        @test parse_err isa BEVE.BeveError
+        @test parse_err.msg == "Unsupported header: unknown type (0xff) at byte 1"
+
+        # Test truncated data error includes position
+        truncated = UInt8[0x04]  # STRING header but no size/data
+        trunc_err = nothing
+        try
+            from_beve(truncated)
+        catch e
+            trunc_err = e
+        end
+        @test trunc_err isa BEVE.BeveError
+        @test trunc_err.msg == "Unexpected end of data at byte 1"
+
+        # Test error in array element - identifies the element type
+        struct ErrTeam
+            members::Vector{ErrPerson}
+        end
+
+        team_incomplete = Dict(
+            "members" => [
+                Dict("name" => "Alice", "age" => 25, "address" => Dict(
+                    "street" => "1 First St", "city" => "Boston",
+                    "coords" => Dict("latitude" => 42.3, "longitude" => -71.0)
+                )),
+                Dict("name" => "Bob", "age" => 30),  # missing 'address' at index 2
+                Dict("name" => "Carol", "age" => 28, "address" => Dict(
+                    "street" => "3 Third St", "city" => "Chicago",
+                    "coords" => Dict("latitude" => 41.8, "longitude" => -87.6)
+                ))
+            ]
+        )
+        bytes_team = to_beve(team_incomplete)
+        err_team = nothing
+        try
+            deser_beve(ErrTeam, bytes_team; error_on_missing_fields = true)
+        catch e
+            err_team = e
+        end
+        @test err_team isa BEVE.BeveError
+        @test err_team.msg == "Missing field 'address' for type ErrPerson"
+
+        # Test deeply nested error - identifies the innermost type
+        struct ErrCompany
+            name::String
+            teams::Vector{ErrTeam}
+        end
+
+        company_incomplete = Dict(
+            "name" => "Acme Corp",
+            "teams" => [
+                Dict("members" => [
+                    Dict("name" => "Dave", "age" => 35, "address" => Dict(
+                        "street" => "HQ", "city" => "NYC",
+                        "coords" => Dict("latitude" => 40.7)  # missing 'longitude'
+                    ))
+                ])
+            ]
+        )
+        bytes_company = to_beve(company_incomplete)
+        err_company = nothing
+        try
+            deser_beve(ErrCompany, bytes_company; error_on_missing_fields = true)
+        catch e
+            err_company = e
+        end
+        @test err_company isa BEVE.BeveError
+        @test err_company.msg == "Missing field 'longitude' for type ErrGeoCoordinates"
+    end
+
     @testset "HTTP Extension Loading" begin
         # Test that HTTP functions work when HTTP.jl is loaded
         using HTTP
