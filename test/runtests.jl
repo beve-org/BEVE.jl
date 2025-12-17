@@ -826,6 +826,73 @@ using BEVE
         @test roundtrip_b.item isa TypeB
         @test roundtrip_b.item.b == "test"
 
+        # Test Union{Nothing, StructType} - struct value should not become nothing
+        # This tests that Nothing is only matched when value is actually nothing,
+        # not when the value is a Dict that could be reconstructed as a struct
+        struct OptionalPerson
+            name::String
+            age::Int
+        end
+
+        struct PersonHolder
+            person::Union{Nothing, OptionalPerson}
+        end
+
+        # Struct value should reconstruct correctly (not become nothing)
+        holder_with_person = PersonHolder(OptionalPerson("Alice", 30))
+        roundtrip_person = deser_beve(PersonHolder, to_beve(holder_with_person))
+        @test roundtrip_person.person isa OptionalPerson
+        @test roundtrip_person.person.name == "Alice"
+        @test roundtrip_person.person.age == 30
+
+        # Nothing value should remain nothing
+        holder_without_person = PersonHolder(nothing)
+        roundtrip_no_person = deser_beve(PersonHolder, to_beve(holder_without_person))
+        @test roundtrip_no_person.person === nothing
+
+        # Test nested Union{Nothing, Struct} - inner struct with optional field
+        struct InnerData
+            value::Int
+            label::String
+        end
+
+        struct OuterContainer
+            data::Union{Nothing, InnerData}
+            count::Int
+        end
+
+        outer_with_data = OuterContainer(InnerData(42, "test"), 5)
+        roundtrip_outer = deser_beve(OuterContainer, to_beve(outer_with_data))
+        @test roundtrip_outer.data isa InnerData
+        @test roundtrip_outer.data.value == 42
+        @test roundtrip_outer.data.label == "test"
+        @test roundtrip_outer.count == 5
+
+        outer_without_data = OuterContainer(nothing, 10)
+        roundtrip_outer_nil = deser_beve(OuterContainer, to_beve(outer_without_data))
+        @test roundtrip_outer_nil.data === nothing
+        @test roundtrip_outer_nil.count == 10
+
+        # Test Vector{Union{Nothing, StructType}}
+        struct SimplePoint
+            x::Int
+            y::Int
+        end
+
+        struct PointCollection
+            points::Vector{Union{Nothing, SimplePoint}}
+        end
+
+        points = PointCollection([SimplePoint(1, 2), nothing, SimplePoint(3, 4), nothing])
+        roundtrip_points = deser_beve(PointCollection, to_beve(points))
+        @test roundtrip_points.points[1] isa SimplePoint
+        @test roundtrip_points.points[1].x == 1
+        @test roundtrip_points.points[1].y == 2
+        @test roundtrip_points.points[2] === nothing
+        @test roundtrip_points.points[3] isa SimplePoint
+        @test roundtrip_points.points[3].x == 3
+        @test roundtrip_points.points[4] === nothing
+
         # Test Union in Vector elements
         struct VectorUnionHolder
             items::Vector{Union{Int, String}}

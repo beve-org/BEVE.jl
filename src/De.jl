@@ -786,6 +786,11 @@ function coerce_value(field_type::Type, value, ctx::ReconstructionContext = Reco
         return value
     elseif field_type isa Union
         for subtype in Base.uniontypes(field_type)
+            # Skip Nothing unless the value is actually nothing;
+            # otherwise Nothing (which has no fields) would match any Dict
+            if subtype === Nothing && value !== nothing
+                continue
+            end
             converted = coerce_value(subtype, value, ctx)
             if converted isa subtype
                 return converted
